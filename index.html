@@ -690,6 +690,164 @@ function montarCasa(){
   if(casaNivel==="nova")     return telaNovaProva(box);
   if(casaNivel==="prova")    return telaProva(box);
   if(casaNivel==="questoes") return telaQuestoes(box);
+  if(casaNivel==="ler")      return telaLerArquivo(box);
+  if(casaNivel==="config")   return telaConfig(box);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   LEITURA DA PROVA A PARTIR DE ARQUIVO
+   Dois caminhos, mesmo destino: o texto cai na tela de questões,
+   onde você confere antes de salvar. A IA nunca grava nada sozinha.
+   ═══════════════════════════════════════════════════════════════════ */
+const CHAVE_API="dbm_chave_api", MODELO_API="dbm_modelo_api";
+const lerChave=()=>guarda.ler(CHAVE_API)||"";
+const lerModelo=()=>guarda.ler(MODELO_API)||"claude-sonnet-5";
+
+const INSTRUCAO=`Leia esta prova e devolva SOMENTE um JSON, sem comentários e sem cercas de código, no formato:
+{"questoes":[{"enunciado":"texto da questão","alternativas":["texto A","texto B","texto C","texto D","texto E"],"correta":0}]}
+
+Regras:
+- "correta" é o índice da alternativa certa (0 = A). Use null se o gabarito não estiver no material.
+- Transcreva fielmente, mantendo números, unidades e símbolos matemáticos (∩, ∪, ⊂, √, π, ², ³).
+- Não resolva as questões nem reescreva enunciados.
+- Se houver figura ou gráfico indispensável, descreva-o entre colchetes dentro do enunciado.`;
+
+let iaArquivo=null;   // {nome, tipo, b64}
+
+function telaLerArquivo(box){
+  const p=provaDe(casaProva), temChave=!!lerChave();
+  box.innerHTML=`<div class="migalha"><button id="mVolta">‹ Questões</button></div>
+    <h2>Ler prova de um arquivo</h2>
+    <p class="sub">Foto ou PDF da prova. O resultado vai para a tela de questões
+      para você conferir — nada é salvo automaticamente.</p>
+    <button class="btn sec" id="bEscolher">Escolher foto ou PDF</button>
+    <input type="file" id="iaArq" accept="image/*,.pdf" hidden>
+    <div id="iaInfo"></div>
+    <div class="rot">Caminho 1 — a Claude lê aqui no aparelho</div>
+    ${temChave
+      ? `<button class="btn" id="bIA">Ler com a Claude</button>
+         <p class="hint">Usa a sua chave de API. Custa centavos por prova.</p>`
+      : `<div class="aviso">Nenhuma chave de API configurada.</div>
+         <button class="btn gho" id="bConfig">Configurar chave</button>`}
+    <div id="iaStatus"></div>
+    <div class="rot">Caminho 2 — pelo chat, sem chave e sem custo</div>
+    <p class="hint">Copie a instrução, mande junto com o arquivo no chat da Claude
+      e cole aqui o JSON devolvido.</p>
+    <button class="btn sec" id="bCopiar">Copiar instrução</button>
+    <textarea id="iaJson" spellcheck="false" style="min-height:120px;margin-top:10px"
+      placeholder='Cole aqui o JSON: {"questoes":[...]}'></textarea>
+    <button class="btn" id="bColar" style="margin-top:10px">Usar este JSON</button>
+    <div id="iaErro"></div>`;
+  $("#mVolta").onclick=()=>{casaNivel="questoes";montarCasa();};
+  $("#bEscolher").onclick=()=>$("#iaArq").click();
+  if($("#bConfig")) $("#bConfig").onclick=()=>{casaNivel="config";montarCasa();};
+  $("#iaArq").onchange=ev=>{
+    const f=ev.target.files[0]; if(!f) return;
+    const r=new FileReader();
+    r.onload=()=>{ iaArquivo={nome:f.name,tipo:f.type||"image/jpeg",
+        b64:String(r.result).split(",")[1]};
+      $("#iaInfo").innerHTML=`<div class="diag" style="margin-top:10px"><b>${esc(f.name)}</b>
+        ${(f.size/1024).toFixed(0)} KB · pronto para leitura</div>`; };
+    r.readAsDataURL(f); ev.target.value="";
+  };
+  $("#bCopiar").onclick=()=>{
+    const t=INSTRUCAO+"\n\nA prova tem "+p.nq+" questões e "+p.no+" alternativas.";
+    if(navigator.clipboard) navigator.clipboard.writeText(t);
+    $("#iaErro").innerHTML='<div class="diag" style="margin-top:10px"><b>Copiado</b>Cole no chat junto com o arquivo da prova.</div>';
+  };
+  $("#bColar").onclick=()=>aplicarJson($("#iaJson").value,p);
+  if($("#bIA")) $("#bIA").onclick=()=>chamarIA(p);
+}
+
+function extrairJson(txt){
+  let t=String(txt||"").trim().replace(/^```(?:json)?/i,"").replace(/```$/,"").trim();
+  const i=t.indexOf("{"), j=t.lastIndexOf("}");
+  if(i<0||j<i) throw new Error("não encontrei um JSON na resposta");
+  return JSON.parse(t.slice(i,j+1));
+}
+function jsonParaTexto(dados,no){
+  const qs=(dados.questoes||dados||[]);
+  if(!Array.isArray(qs)||!qs.length) throw new Error("o JSON não trouxe questões");
+  return qs.map((q,i)=>{
+    const alts=(q.alternativas||[]).slice(0,no).map((a,k)=>
+      ((q.correta===k)?"*":"")+"ABCDE"[k]+") "+String(a).trim());
+    return (i+1)+". "+String(q.enunciado||"").trim()+(alts.length?"\n"+alts.join("\n"):"");
+  }).join("\n\n");
+}
+function aplicarJson(txt,p){
+  try{
+    const texto=jsonParaTexto(extrairJson(txt),p.no);
+    iaTexto=texto; casaNivel="questoes"; montarCasa();
+  }catch(e){
+    $("#iaErro").innerHTML=`<div class="aviso" style="margin-top:10px">Não consegui usar: ${esc(e.message)}</div>`;
+  }
+}
+let iaTexto=null;   // texto vindo da leitura, para a tela de questões exibir
+
+async function chamarIA(p){
+  const st=$("#iaStatus");
+  if(!iaArquivo){ st.innerHTML='<div class="aviso" style="margin-top:10px">Escolha a foto ou o PDF primeiro.</div>'; return; }
+  st.innerHTML='<div class="diag" style="margin-top:10px">Enviando para a Claude…</div>';
+  const bloco = /pdf/i.test(iaArquivo.tipo)
+    ? {type:"document",source:{type:"base64",media_type:"application/pdf",data:iaArquivo.b64}}
+    : {type:"image",source:{type:"base64",media_type:iaArquivo.tipo,data:iaArquivo.b64}};
+  try{
+    const resp=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"content-type":"application/json","x-api-key":lerChave(),
+        "anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:lerModelo(),max_tokens:8000,
+        messages:[{role:"user",content:[bloco,{type:"text",
+          text:INSTRUCAO+"\n\nA prova tem "+p.nq+" questões e "+p.no+" alternativas."}]}]})
+    });
+    if(!resp.ok){
+      const e=await resp.text();
+      throw new Error("a API respondeu "+resp.status+" — "+e.slice(0,180));
+    }
+    const dados=await resp.json();
+    const texto=(dados.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n");
+    const u=dados.usage||{};
+    iaTexto=jsonParaTexto(extrairJson(texto),p.no);
+    st.innerHTML=`<div class="diag" style="margin-top:10px"><b>Leitura concluída</b>
+      ${u.input_tokens||"?"} tokens de entrada, ${u.output_tokens||"?"} de saída.
+      Confira o texto antes de salvar.</div>`;
+    setTimeout(()=>{casaNivel="questoes";montarCasa();},600);
+  }catch(err){
+    st.innerHTML=`<div class="aviso" style="margin-top:10px">Falhou: ${esc(err.message)}<br>
+      Você ainda pode usar o caminho pelo chat, abaixo.</div>`;
+  }
+}
+
+function telaConfig(box){
+  box.innerHTML=`<div class="migalha"><button id="mVolta">‹ Voltar</button></div>
+    <h2>Leitura por IA</h2>
+    <p class="sub">Opcional. Sem chave, o app funciona igual — só a leitura
+      automática da prova deixa de existir.</p>
+    <label>Chave de API</label>
+    <input id="cfChave" class="mono" type="password" placeholder="sk-ant-..." value="${esc(lerChave())}">
+    <label>Modelo</label>
+    <select id="cfModelo">
+      <option value="claude-sonnet-5">Sonnet — equilíbrio (recomendado)</option>
+      <option value="claude-haiku-4-5-20251001">Haiku — mais barato</option>
+      <option value="claude-opus-5">Opus — mais caro, leitura difícil</option>
+    </select>
+    <div class="duo" style="margin-top:14px">
+      <button class="btn gho" id="cfApagar">Apagar chave</button>
+      <button class="btn" id="cfSalvar">Salvar</button></div>
+    <div class="aviso" style="margin-top:14px">A chave fica guardada neste aparelho,
+      no armazenamento do navegador. Não a use num celular compartilhado, e apague-a
+      antes de emprestar o aparelho.</div>
+    <p class="hint">A cobrança da API é separada do plano do aplicativo Claude.
+      Você cria a chave e coloca crédito em console.anthropic.com.</p>`;
+  $("#cfModelo").value=lerModelo();
+  $("#mVolta").onclick=()=>{casaNivel=casaProva?"ler":"turmas";montarCasa();};
+  $("#cfSalvar").onclick=()=>{
+    guarda.esc(CHAVE_API,$("#cfChave").value.trim());
+    guarda.esc(MODELO_API,$("#cfModelo").value);
+    casaNivel=casaProva?"ler":"turmas"; montarCasa(); };
+  $("#cfApagar").onclick=()=>{
+    if(!confirm("Apagar a chave guardada?")) return;
+    guarda.esc(CHAVE_API,""); $("#cfChave").value=""; };
 }
 
 /* ── ficha da prova: corrigir, editar questões, gerar PDF ────────── */
@@ -786,9 +944,13 @@ E) conjunto vazio
     <div class="duo" style="margin-top:11px">
       <button class="btn sec" id="bConferir">Conferir</button>
       <button class="btn" id="bSalvaQ">Salvar questões</button></div>
+    <button class="btn gho" id="bLerArq" style="margin-top:9px">Ler de uma foto ou PDF</button>
     <p class="hint">Linhas soltas continuam o enunciado ou a alternativa anterior,
       então pode colar texto quebrado que o app remonta.</p>`;
-  $("#txQ").value=questoesParaTexto(p.questoes);
+  if(iaTexto){ $("#txQ").value=iaTexto; iaTexto=null;
+    $("#qAviso").innerHTML='<div class="aviso">Texto vindo da leitura automática. '+
+      'Confira sinais, expoentes e frações antes de salvar — é aqui que a IA erra.</div>';
+  } else $("#txQ").value=questoesParaTexto(p.questoes);
   const conferir=()=>{
     const {questoes,gabarito}=lerQuestoes($("#txQ").value);
     const av=[];
@@ -821,6 +983,7 @@ E) conjunto vazio
   $("#txQ").oninput=()=>{ $("#qAviso").innerHTML=""; };
   $("#bConferir").onclick=conferir;
   $("#mVolta").onclick=()=>{casaNivel="prova";montarCasa();};
+  $("#bLerArq").onclick=()=>{casaNivel="ler";montarCasa();};
   $("#bSalvaQ").onclick=()=>{
     const {questoes,gabarito,semMarca}=conferir();
     if(!questoes.length){ alert("Não encontrei nenhuma questão no texto."); return; }
@@ -898,7 +1061,12 @@ function telaTurmas(box){
         </div><span class="ch">›</span></button>`;}).join("");
     h+="</div>";
   });
+  h+=`<button class="item" id="bCfg" style="margin-top:6px"><div class="cor">
+    <div class="t1">Leitura por IA</div>
+    <div class="t2">${lerChave()?"Chave configurada · "+esc(lerModelo()):"Sem chave — opcional"}</div>
+    </div><span class="ch">›</span></button>`;
   box.innerHTML=h;
+  $("#bCfg").onclick=()=>{casaProva=null;casaNivel="config";montarCasa();};
   box.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>{
     casaTurma=b.dataset.t; casaNivel="provas"; montarCasa(); });
 }
