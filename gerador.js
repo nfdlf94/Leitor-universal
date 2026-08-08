@@ -153,102 +153,294 @@ function desenharCartao(doc, opt){
 /* ═══════════════════════════════════════════════════════════════════
    PROVA COMPLETA — uma por aluno, questões e alternativas embaralhadas
    ═══════════════════════════════════════════════════════════════════ */
-const MARG = 16, TOPO = 14;
+/* ═══════════════════════════════════════════════════════════════════
+   DIAGRAMAÇÃO DA PROVA
+   Segue o modelo em uso: faixa da escola, identificação do estudante,
+   cartão-resposta no alto, questões em duas colunas e rascunho no fim.
+   O corpo do texto encolhe automaticamente até caber em 2 páginas.
+   ═══════════════════════════════════════════════════════════════════ */
+const MARG = 12, GUT = 7, TOPO = 12, MARGEM_INF = 10;
+const MARGEM_CARTAO = 6;
+const CORPOS = [10.5, 10];   // legibilidade tem piso: nunca menor que 10 pt
 
-function cabecalho(doc, cfg, aluno, larguraUtil){
-  doc.setFillColor(...COR.navy);
-  doc.rect(0, 0, doc.internal.pageSize.getWidth(), 25, "F");
-  doc.setTextColor(...COR.branco); doc.setFont(FONTE_TEXTO,"bold"); doc.setFontSize(12);
-  doc.text(cfg.escola || "DESBUGANDO A MATEMÁTICA", MARG, 10);
-  doc.setTextColor(...COR.orange); doc.setFontSize(7.5);
-  doc.text([cfg.titulo || cfg.codigo, cfg.turma, cfg.disciplina]
-             .filter(Boolean).join("  •  ").toUpperCase(), MARG, 16.5);
-  doc.setTextColor(...COR.branco); doc.setFont(FONTE_TEXTO,"normal"); doc.setFontSize(8.5);
-  doc.text("Nº " + aluno.numero + "  ·  " + aluno.nome, MARG, 22);
-  return 25 + 8;
-}
+const larguraColuna = doc =>
+  (doc.internal.pageSize.getWidth() - 2 * MARG - GUT) / 2;
+const xColuna = (doc, c) => MARG + c * (larguraColuna(doc) + GUT);
 
-function desenharQuestao(doc, y, n, item, larguraUtil, opcoes){
-  const alturaLinha = 4.6;
-  doc.setTextColor(...COR.navy); doc.setFont(FONTE_TEXTO,"bold"); doc.setFontSize(9.5);
-  doc.text(String(n).padStart(2,"0") + ".", MARG, y);
-  doc.setFont(FONTE_TEXTO,"normal"); doc.setFontSize(9.5); doc.setTextColor(30,30,30);
-  const linhas = doc.splitTextToSize(String(item.enunciado||""), larguraUtil - 9);
-  doc.text(linhas, MARG + 9, y);
-  y += linhas.length * alturaLinha + 1.5;
-  (item.alternativas||[]).forEach((alt, k) => {
-    doc.setFont(FONTE_TEXTO,"bold"); doc.setTextColor(...COR.orange); doc.setFontSize(9);
-    doc.text(opcoes[k] + ")", MARG + 11, y);
-    doc.setFont(FONTE_TEXTO,"normal"); doc.setTextColor(30,30,30);
-    const la = doc.splitTextToSize(String(alt), larguraUtil - 22);
-    doc.text(la, MARG + 18, y);
-    y += la.length * alturaLinha + 0.6;
-  });
+/* ── cabeçalho ──────────────────────────────────────────────────── */
+function cabecalho(doc, cfg, aluno, dry){
+  const W = doc.internal.pageSize.getWidth(), util = W - 2 * MARG;
+  const alturaFaixa = 13;
+  if(!dry){
+    doc.setFillColor(...COR.navy);
+    doc.rect(0, 0, W, alturaFaixa, "F");
+    doc.setTextColor(...COR.branco); doc.setFont(FONTE_TEXTO, "bold"); doc.setFontSize(9);
+    doc.text(String(cfg.escola || "").toUpperCase(), MARG, 6);
+    doc.setTextColor(...COR.orange); doc.setFontSize(7);
+    doc.text([cfg.titulo || "AVALIAÇÃO DE APRENDIZAGEM", cfg.periodoLabel]
+               .filter(Boolean).join("  •  ").toUpperCase(), MARG, 10.5);
+  }
+  let y = alturaFaixa + 5;
+
+  // faixa de identificação: ALUNO(A) | TURMA | Nº
+  const hLinha = 11, colTurma = util - 40, colNum = util - 16;
+  if(!dry){
+    doc.setDrawColor(...COR.grey); doc.setLineWidth(0.3);
+    doc.rect(MARG, y, util, hLinha, "S");
+    doc.line(MARG + colTurma, y, MARG + colTurma, y + hLinha);
+    doc.line(MARG + colNum, y, MARG + colNum, y + hLinha);
+    doc.setTextColor(...COR.grey); doc.setFont(FONTE_TEXTO, "bold"); doc.setFontSize(5.5);
+    doc.text("ALUNO(A)", MARG + 2, y + 3.4);
+    doc.text("TURMA", MARG + colTurma + 2, y + 3.4);
+    doc.text("Nº", MARG + colNum + 2, y + 3.4);
+    doc.setTextColor(...COR.navy); doc.setFont(FONTE_TEXTO, "bold"); doc.setFontSize(9);
+    doc.text(String(aluno.nome || "").toUpperCase(), MARG + 2, y + 8.6);
+    doc.text(String(cfg.turma || ""), MARG + colTurma + 2, y + 8.6);
+    doc.text(String(aluno.numero || ""), MARG + colNum + 2, y + 8.6);
+  }
+  y += hLinha + 4;
+
+  if(!dry){
+    doc.setTextColor(80, 88, 100); doc.setFont(FONTE_TEXTO, "normal"); doc.setFontSize(7);
+    const linha = "DISCIPLINA: " + (cfg.disciplina || "") +
+      "        PROFESSOR: " + (cfg.professor || "") +
+      "        DATA: ____ / ____ / ______";
+    doc.text(linha, MARG, y);
+  }
   return y + 4;
 }
 
-/* altura aproximada, para decidir quebra de página sem desenhar */
-function alturaQuestao(doc, item, larguraUtil){
-  doc.setFont(FONTE_TEXTO,"normal"); doc.setFontSize(9.5);
-  let h = doc.splitTextToSize(String(item.enunciado||""), larguraUtil - 9).length * 4.6 + 1.5;
-  (item.alternativas||[]).forEach(a => {
-    h += doc.splitTextToSize(String(a), larguraUtil - 22).length * 4.6 + 0.6; });
-  return h + 4;
+/* figura: nunca mais larga que a coluna nem mais alta que meia página */
+const FIG_MAX_H = 52;
+function medirFigura(img, larguraDisponivel){
+  if(!img || !img.dados) return null;
+  const pw = img.w || 400, ph = img.h || 300;
+  const teto = larguraDisponivel || 78;
+  let w = Math.min(teto, pw * 0.2646);          // px -> mm a ~96 dpi
+  let h = w * ph / pw;
+  if(h > FIG_MAX_H){ h = FIG_MAX_H; w = h * pw / ph; }
+  return {w, h};
+}
+
+/* ── medidas de uma questão dentro da coluna ────────────────────── */
+function medidasQuestao(doc, item, larg, fs, opcoes){
+  doc.setFont(FONTE_TEXTO, "normal"); doc.setFontSize(fs);
+  const passo = fs * 0.42;
+  const linhasEnun = doc.splitTextToSize(String(item.enunciado || ""), larg);
+  let h = 5.2 + linhasEnun.length * passo + 1.4;       // rótulo + enunciado
+  const fig = medirFigura(item.imagem, larg);
+  if(fig) h += fig.h + 2.5;
+  const alts = (item.alternativas || []).map(a =>
+    doc.splitTextToSize(String(a == null ? "" : a), larg - 7));
+  alts.forEach(la => { h += la.length * passo + 0.9; });
+  return {h, linhasEnun, alts, fig, passo};
+}
+
+function desenharQuestaoCol(doc, x, y, n, item, larg, fs, opcoes, m){
+  doc.setTextColor(...COR.navy); doc.setFont(FONTE_TEXTO, "bold"); doc.setFontSize(fs - 1.5);
+  doc.text("QUESTÃO " + String(n).padStart(2, "0"), x, y + 2.4);
+  doc.setDrawColor(...COR.orange); doc.setLineWidth(0.6);
+  doc.line(x, y + 3.6, x + 15, y + 3.6);
+  y += 5.2;
+
+  doc.setFont(FONTE_TEXTO, "normal"); doc.setFontSize(fs); doc.setTextColor(25, 28, 34);
+  doc.text(m.linhasEnun, x, y + m.passo * 0.75);
+  y += m.linhasEnun.length * m.passo + 1.4;
+
+  if(m.fig){
+    try{ doc.addImage(item.imagem.dados, "JPEG", x, y, m.fig.w, m.fig.h); }catch(e){}
+    y += m.fig.h + 2.5;
+  }
+  m.alts.forEach((la, k) => {
+    doc.setFont(FONTE_TEXTO, "bold"); doc.setTextColor(...COR.orange); doc.setFontSize(fs);
+    doc.text(opcoes[k] + ")", x + 1, y + m.passo * 0.75);
+    doc.setFont(FONTE_TEXTO, "normal"); doc.setTextColor(25, 28, 34);
+    doc.text(la, x + 7, y + m.passo * 0.75);
+    y += la.length * m.passo + 0.9;
+  });
+  return y + 3.4;
+}
+
+/* ── rascunho ───────────────────────────────────────────────────── */
+function desenharRascunho(doc, y, altura){
+  const W = doc.internal.pageSize.getWidth(), util = W - 2 * MARG;
+  doc.setDrawColor(...COR.grey); doc.setLineWidth(0.3);
+  if(doc.setLineDashPattern) doc.setLineDashPattern([2, 2], 0);
+  doc.rect(MARG, y, util, altura, "S");
+  if(doc.setLineDashPattern) doc.setLineDashPattern([], 0);
+  doc.setTextColor(...COR.grey); doc.setFont(FONTE_TEXTO, "normal"); doc.setFontSize(6.5);
+  doc.text("RASCUNHO — esta área não será corrigida", MARG + 3, y + 4.5);
+}
+
+/* ── fluxo: monta blocos e os distribui equilibrando as colunas ──── */
+function blocosDaProva(doc, cfg, aluno, fs){
+  const larg = larguraColuna(doc);
+  const gabC = String(cfg.gabaritoCanonico).toUpperCase();
+  const nq = gabC.length, no = cfg.no || 5;
+  const opcoes = ["A", "B", "C", "D", "E"].slice(0, no);
+  const {oq, oa} = embaralharProva(nq, no, cfg.turma, aluno.numero);
+  const blocos = [];
+
+  for(let p = 0; p < nq; p++){
+    const base = (cfg.questoes || [])[oq[p]] ||
+      {enunciado: "(questão " + (oq[p] + 1) + ")", alternativas: []};
+    const item = {enunciado: base.enunciado, imagem: base.imagem,
+      alternativas: oa[p].map(ci => (base.alternativas || [])[ci])};
+    const m = medidasQuestao(doc, item, larg, fs, opcoes);
+    blocos.push({h: m.h + 3.4, juntoComProximo: false,
+      desenhar: (x, y) => desenharQuestaoCol(doc, x, y, p + 1, item, larg, fs, opcoes, m)});
+  }
+
+  const disc = cfg.discursivas || [];
+  if(disc.length){
+    blocos.push({h: 8, juntoComProximo: true, desenhar: (x, y) => {
+      doc.setFillColor(...COR.navy);
+      doc.rect(x, y, larg, 5.5, "F");
+      doc.setTextColor(...COR.branco); doc.setFont(FONTE_TEXTO, "bold"); doc.setFontSize(6.5);
+      doc.text("PARTE II — DISCURSIVAS", x + 2, y + 3.9);
+      return y + 8;
+    }});
+    disc.forEach((q, i) => {
+      doc.setFont(FONTE_TEXTO, "normal"); doc.setFontSize(fs);
+      const passo = fs * 0.42;
+      const linhas = doc.splitTextToSize(String(q.enunciado || ""), larg);
+      const espaco = Math.max(14, (q.linhas || 4) * 5.5);
+      const h = 5 + linhas.length * passo + espaco + 4;
+      blocos.push({h, juntoComProximo: false, desenhar: (x, y) => {
+        doc.setTextColor(...COR.navy); doc.setFont(FONTE_TEXTO, "bold"); doc.setFontSize(fs - 1.5);
+        doc.text((i + 1) + ".  (" + (q.pontos != null ? q.pontos : "") + " pt)", x, y + 2.4);
+        doc.setFont(FONTE_TEXTO, "normal"); doc.setFontSize(fs); doc.setTextColor(25, 28, 34);
+        doc.text(linhas, x, y + 5 + passo * 0.75);
+        let yy = y + 5 + linhas.length * passo + 2;
+        doc.setDrawColor(210, 214, 220); doc.setLineWidth(0.25);
+        for(let l = 0; l < Math.round(espaco / 5.5); l++)
+          doc.line(x, yy + l * 5.5, x + larg, yy + l * 5.5);
+        return y + h;
+      }});
+    });
+  }
+  return blocos;
+}
+
+/* Onde cortar uma página em duas colunas: o corte que deixa as colunas
+   mais parecidas, sem estourar nenhuma. -1 se não couber. */
+function melhorCorte(alturas, capacidade){
+  const total = alturas.reduce((a, b) => a + b, 0);
+  let melhor = -1, dif = Infinity;
+  let esq = 0;
+  for(let k = 1; k <= alturas.length; k++){
+    esq += alturas[k - 1];
+    const dir = total - esq;
+    if(esq <= capacidade && dir <= capacidade){
+      const d = Math.abs(esq - dir);
+      if(d < dif){ dif = d; melhor = k; }
+    }
+  }
+  return melhor;
+}
+
+function fluir(doc, cfg, aluno, fs, dry){
+  const alturaPag = doc.internal.pageSize.getHeight();
+  const fundo = alturaPag - MARGEM_INF;
+  const gabC = String(cfg.gabaritoCanonico).toUpperCase();
+  const nq = gabC.length, no = cfg.no || 5;
+
+  let paginas = 1;
+  let y = cabecalho(doc, cfg, aluno, dry);
+
+  const L = montarLayout(nq, no);
+  const altCartao = L.box_h + 2 * L.quiet_zone;
+  if(!dry){
+    desenharCartao(doc, {x: MARG + 2, y: y + L.quiet_zone,
+      codigo: cfg.codigo, gabaritoCanonico: gabC, no,
+      turma: cfg.turma, numero: aluno.numero, nome: aluno.nome});
+  }
+  const topoPrimeira = y + altCartao + 8;   // folga para não colidir com a moldura
+
+  const blocos = blocosDaProva(doc, cfg, aluno, fs);
+  const alturas = blocos.map(b => b.h);
+
+  let i = 0, topo = topoPrimeira, ultimoUso = topo;
+  while(i < blocos.length){
+    const cap = fundo - topo;
+    // maior conjunto de blocos que cabe nesta página, já equilibrado
+    let leva = 0, corte = 1;
+    for(let n = 1; i + n <= blocos.length; n++){
+      const k = melhorCorte(alturas.slice(i, i + n), cap);
+      if(k < 0) break;
+      leva = n; corte = k;
+    }
+    if(leva === 0){ leva = 1; corte = 1; }   // bloco maior que a coluna: transborda
+
+    if(!dry){
+      let ye = topo, yd = topo;
+      for(let n = 0; n < leva; n++){
+        const b = blocos[i + n];
+        if(n < corte){ ye = b.desenhar(xColuna(doc, 0), ye); }
+        else { yd = b.desenhar(xColuna(doc, 1), yd); }
+      }
+      ultimoUso = Math.max(ye, yd);
+    } else {
+      const somaE = alturas.slice(i, i + corte).reduce((a, b) => a + b, 0);
+      const somaD = alturas.slice(i + corte, i + leva).reduce((a, b) => a + b, 0);
+      ultimoUso = topo + Math.max(somaE, somaD);
+    }
+    i += leva;
+    if(i < blocos.length){
+      // sobrou espaço embaixo desta página? vira rascunho, não vazio
+      const folga = fundo - ultimoUso;
+      if(!dry && folga >= 30) desenharRascunho(doc, ultimoUso + 3, folga - 3);
+      paginas++;
+      if(!dry) doc.addPage();
+      topo = TOPO;
+    }
+  }
+
+  // o rascunho é um bônus: só entra no espaço que sobrou, nunca
+  // pede uma página nova — papel a mais não vale por área de rabisco
+  const sobra = fundo - ultimoUso;
+  if(!dry && sobra >= 26) desenharRascunho(doc, ultimoUso + 3, sobra - 3);
+  return paginas;
 }
 
 /**
- * cfg = {codigo, titulo, escola, turma, disciplina, gabaritoCanonico, no,
- *        questoes:[{enunciado, alternativas:[...]}]}
- * alunos = [{numero, nome}]
- * Devolve o objeto jsPDF pronto para salvar.
+ * cfg = {codigo, titulo, escola, turma, disciplina, professor, periodoLabel,
+ *        gabaritoCanonico, no, questoes:[...], discursivas:[...]}
  */
 function gerarProvas(cfg, alunos, jsPDFctor){
   const Ctor = jsPDFctor || (window.jspdf && window.jspdf.jsPDF);
-  const doc = new Ctor({unit:"mm", format:"a4", compress:true});
+  const doc = new Ctor({unit: "mm", format: "a4", compress: true});
   prepararFontes(doc);
 
-  // conferência prévia: um caractere fora da fonte apaga o resto da linha,
-  // e isso só apareceria depois de 40 provas impressas
   if(typeof caracteresFaltando === "function"){
-    const textos = [cfg.titulo, cfg.escola, cfg.disciplina];
-    (cfg.questoes||[]).forEach(q=>{ textos.push(q.enunciado);
-      (q.alternativas||[]).forEach(a=>textos.push(a)); });
-    alunos.forEach(a=>textos.push(a.nome));
+    const textos = [cfg.titulo, cfg.escola, cfg.disciplina, cfg.professor];
+    (cfg.questoes || []).forEach(q => { textos.push(q.enunciado);
+      (q.alternativas || []).forEach(a => textos.push(a)); });
+    (cfg.discursivas || []).forEach(q => textos.push(q.enunciado));
+    alunos.forEach(a => textos.push(a.nome));
     const fora = caracteresFaltando(textos);
     if(fora.length) doc.avisoCaracteres = fora;
   }
-  const larguraPag = doc.internal.pageSize.getWidth();
-  const alturaPag  = doc.internal.pageSize.getHeight();
-  const larguraUtil = larguraPag - 2*MARG;
-  const gabC = String(cfg.gabaritoCanonico).toUpperCase();
-  const nq = gabC.length, no = cfg.no || 5;
-  const opcoes = ["A","B","C","D","E"].slice(0, no);
-  const alturaCartao = montarLayout(nq, no).box_h + 2*montarLayout(nq, no).quiet_zone;
+
+  /* Regra: gastar o menor número de folhas possível; havendo empate,
+     usar a letra maior. Assim uma prova curta cabe em uma lauda só e
+     uma longa cresce para três, sem nunca descer de 10 pt. */
+  const molde = new Ctor({unit: "mm", format: "a4"});
+  prepararFontes(molde);
+  const referencia = alunos[0] || {numero: "01", nome: "MODELO"};
+  const medidas = CORPOS.map(fs => ({fs, pgs: fluir(molde, cfg, referencia, fs, true)}));
+  const minimo = Math.min(...medidas.map(m => m.pgs));
+  const escolha = medidas.find(m => m.pgs === minimo);   // CORPOS vem do maior
+  const corpo = escolha.fs;
+  doc.corpoUsado = corpo;
+  doc.paginasPorAluno = escolha.pgs;
 
   alunos.forEach((aluno, idx) => {
     if(idx) doc.addPage();
-    const {oq, oa} = embaralharProva(nq, no, cfg.turma, aluno.numero);
-    let y = cabecalho(doc, cfg, aluno, larguraUtil);
-
-    for(let p = 0; p < nq; p++){
-      const base = (cfg.questoes||[])[oq[p]] || {enunciado:"(questão "+(oq[p]+1)+")", alternativas:[]};
-      // a posição k impressa recebe a alternativa canônica oa[p][k] —
-      // é exatamente a convenção que letraCanonica() desfaz na correção
-      const item = {enunciado: base.enunciado,
-        alternativas: oa[p].map(ci => (base.alternativas||[])[ci])};
-      const h = alturaQuestao(doc, item, larguraUtil);
-      if(y + h > alturaPag - MARG){ doc.addPage(); y = TOPO; }
-      y = desenharQuestao(doc, y, p+1, item, larguraUtil, opcoes);
-    }
-
-    // cartão sempre no rodapé de uma página, com espaço garantido
-    if(y + alturaCartao > alturaPag - 10){ doc.addPage(); y = TOPO; }
-    desenharCartao(doc, {x: MARG, y: alturaPag - alturaCartao - 6,
-      codigo: cfg.codigo, gabaritoCanonico: gabC, no,
-      turma: cfg.turma, numero: aluno.numero, nome: aluno.nome});
+    fluir(doc, cfg, aluno, corpo, false);
   });
   return doc;
 }
 
 if(typeof module !== "undefined") module.exports =
-  {desenharCartao, gerarProvas, gabaritoIndividual, montarPayload, encurtarNome, prepararFontes};
+  {desenharCartao, gerarProvas, gabaritoIndividual, montarPayload, encurtarNome, prepararFontes, medirFigura};

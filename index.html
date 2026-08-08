@@ -801,7 +801,8 @@ function montarCasaInterno(box){
    Dois caminhos, mesmo destino: o texto cai na tela de questões,
    onde você confere antes de salvar. A IA nunca grava nada sozinha.
    ═══════════════════════════════════════════════════════════════════ */
-const CHAVE_API="dbm_chave_api", MODELO_API="dbm_modelo_api";
+const CHAVE_API="dbm_chave_api", MODELO_API="dbm_modelo_api", NOME_PROF="dbm_professor";
+const lerProfessor=()=>guarda.ler(NOME_PROF)||"";
 const lerChave=()=>guarda.ler(CHAVE_API)||"";
 const lerModelo=()=>guarda.ler(MODELO_API)||"claude-sonnet-5";
 
@@ -1350,7 +1351,10 @@ function telaFechamento(box){
 
 function telaConfig(box){
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ Voltar</button></div>
-    <h2>Leitura por IA</h2>
+    <h2>Configurações</h2>
+    <label>Seu nome (sai impresso no cabeçalho das provas)</label>
+    <input id="cfProf" placeholder="Natanael Filho" value="${esc(lerProfessor())}">
+    <div class="rot">Leitura por IA</div>
     <p class="sub">Opcional. Sem chave, o app funciona igual — só a leitura
       automática da prova deixa de existir.</p>
     <label>Chave de API</label>
@@ -1372,6 +1376,7 @@ function telaConfig(box){
   $("#cfModelo").value=lerModelo();
   $("#mVolta").onclick=()=>{casaNivel=casaProva?"ler":"turmas";montarCasa();};
   $("#cfSalvar").onclick=()=>{
+    guarda.esc(NOME_PROF,$("#cfProf").value.trim());
     guarda.esc(CHAVE_API,$("#cfChave").value.trim());
     guarda.esc(MODELO_API,$("#cfModelo").value);
     casaNivel=casaProva?"ler":"turmas"; montarCasa(); };
@@ -1603,7 +1608,9 @@ function gerarPDF(p,t,modo){
     try{
       const e=escolaDe(t.escola);
       const cfg={codigo:p.codigo,titulo:p.titulo,escola:e?e.nome:"",turma:t.nome,
-        disciplina:t.disciplina,gabaritoCanonico:p.gabC,no:p.no,questoes:p.questoes||[],
+        disciplina:t.disciplina,professor:lerProfessor(),
+        periodoLabel:nomePeriodo(t,p.periodo||1),
+        gabaritoCanonico:p.gabC,no:p.no,questoes:p.questoes||[],
         discursivas:p.discursivas||[]};
       const doc = (modo==="cartoes")
         ? gerarFolhasDeCartoes(cfg,t.alunos)
@@ -1613,7 +1620,9 @@ function gerarPDF(p,t,modo){
       let extra="";
       if(doc.avisoCaracteres&&doc.avisoCaracteres.length)
         extra=`<br><b>Atenção:</b> os caracteres ${esc(doc.avisoCaracteres.join(" "))} não existem na fonte e não foram impressos.`;
-      dizer("diag","<b>Pronto</b>"+doc.getNumberOfPages()+" páginas · "+nome+extra);
+      const porAluno=(doc.getNumberOfPages()/Math.max(1,t.alunos.length)).toFixed(0);
+      dizer("diag","<b>Pronto</b>"+doc.getNumberOfPages()+" páginas ("+porAluno+
+        " por estudante) · corpo "+(doc.corpoUsado||"")+"pt · "+nome+extra);
     }catch(err){ console.error(err); dizer("aviso","Falhou ao gerar: "+err.message); }
   },50);
 }
@@ -1658,8 +1667,9 @@ function telaTurmas(box){
     h+="</div>";
   });
   h+=`<button class="item" id="bCfg" style="margin-top:6px"><div class="cor">
-    <div class="t1">Leitura por IA</div>
-    <div class="t2">${lerChave()?"Chave configurada · "+esc(lerModelo()):"Sem chave — opcional"}</div>
+    <div class="t1">Configurações</div>
+    <div class="t2">${lerProfessor()?esc(lerProfessor()):"Sem nome de professor"} · ${
+      lerChave()?"chave de IA configurada":"sem chave de IA"}</div>
     </div><span class="ch">›</span></button>`;
   box.innerHTML=h;
   $("#bCfg").onclick=()=>{casaProva=null;casaNivel="config";montarCasa();};
