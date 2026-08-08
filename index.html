@@ -134,6 +134,8 @@ h2{font-size:20px;font-weight:600;margin:6px 0 3px}
 .diag b{display:block;font-size:11px;letter-spacing:.09em;text-transform:uppercase;
   color:var(--orange);margin-bottom:5px}
 .diag ul{margin:5px 0 0;padding-left:17px} .diag li{margin-bottom:3px}
+.diag strong{display:inline;font-weight:600;color:var(--orange);
+  font-size:inherit;letter-spacing:normal;text-transform:none;margin:0}
 
 .opt{display:grid;grid-template-columns:auto repeat(5,1fr);gap:5px;align-items:center;
   margin-bottom:5px}
@@ -1447,7 +1449,27 @@ function telaProva(box){
 }
 
 /* ── questões: aceita o formato que o professor já digita ────────── */
-function lerQuestoes(txt){
+/* Muitas provas trazem o gabarito no fim, em bloco. Ele precisa ser
+   separado ANTES de ler as questões: senão "01. B  02. C" vira questão. */
+function separarGabarito(txt){
+  const linhas=String(txt).split(/\r?\n/);
+  const marca=/^\s*(gabarito|respostas?|chave\s+de\s+respostas?|folha\s+de\s+respostas?)\s*:?\s*$/i;
+  let i=linhas.findIndex(l=>marca.test(l));
+  if(i<0){                                   // às vezes vem com texto na mesma linha
+    i=linhas.findIndex(l=>/^\s*(gabarito|respostas)\b/i.test(l) &&
+      /\d{1,2}\s*[).:\-–]?\s*[A-Ea-e]\b/.test(l));
+  }
+  if(i<0) return {corpo:txt, chave:null};
+  const bloco=linhas.slice(i).join("\n");
+  const chave={};
+  const re=/(\d{1,2})\s*[).:\-–]?\s*([A-Ea-e])(?![A-Za-zÀ-ÿ0-9])/g;
+  let m; while((m=re.exec(bloco))) chave[+m[1]]=m[2].toUpperCase();
+  if(!Object.keys(chave).length) return {corpo:txt, chave:null};
+  return {corpo:linhas.slice(0,i).join("\n"), chave};
+}
+
+function lerQuestoes(txtBruto){
+  const {corpo:txt, chave}=separarGabarito(txtBruto);
   const questoes=[]; let gab="", atual=null, ultimaAlt=null, alvo=null;
   let linhas=String(txt).split(/\r?\n/);
   // descarta cabeçalho/instruções antes da primeira questão numerada,
@@ -1476,8 +1498,15 @@ function lerQuestoes(txt){
     if(!atual){ atual={enunciado:l,alternativas:[],correta:null};
       questoes.push(atual); alvo="enun"; }
   });
+  if(chave) questoes.forEach((q,i)=>{
+    const letra=chave[i+1];
+    if(letra && q.correta==null){
+      const k="ABCDE".indexOf(letra);
+      if(k>=0 && k<Math.max(q.alternativas.length,5)) q.correta=k;
+    }
+  });
   questoes.forEach(q=>{ gab += (q.correta==null?"?":"ABCDE"[q.correta]); });
-  return {questoes,gabarito:gab};
+  return {questoes,gabarito:gab,doArquivo:!!chave};
 }
 function questoesParaTexto(qs){
   return (qs||[]).map((q,i)=>{
@@ -1870,8 +1899,8 @@ function telaNovaProva(box){
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(t.nome)}</button></div>
     <h2>${F.substitui?"Substituir a prova":(F.vindoDeArquivo?"Confirmar a prova lida":"Nova prova")}</h2>
     <p class="sub">Turma ${esc(t.nome)} · ${esc(t.disciplina)}</p>
-    ${F.vindoDeArquivo?`<div class="diag">Li <b>${F.nq}</b> questões com
-      <b>${F.no}</b> alternativas${F.gab?` e o gabarito <b>${esc(F.gab)}</b>`:
+    ${F.vindoDeArquivo?`<div class="diag">Li <strong>${F.nq}</strong> questões com
+      <strong>${F.no}</strong> alternativas${F.gab?` e o gabarito <strong>${esc(F.gab)}</strong>`:
       `. Não achei o gabarito no arquivo — digite abaixo`}.
       ${F.substitui?"Confirme para substituir a prova antiga — código, período e pontuação foram mantidos."
         :"Dê um código à prova e confirme; as questões já entram junto."}</div>`:""}
