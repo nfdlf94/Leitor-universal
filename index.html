@@ -277,6 +277,7 @@ textarea{min-height:132px;resize:vertical;font-family:var(--mono);font-size:12.5
 <script src="fonte.js"></script>
 <script src="gerador.js"></script>
 <script src="mammoth.browser.min.js"></script>
+<script src="pdf.min.js"></script>
 <script>
 "use strict";
 /* ═══════════════════════════════════════════════════════════════════
@@ -768,6 +769,17 @@ let casaNivel="turmas", casaTurma=null, casaForm=null;
 
 function montarCasa(){
   const box=$("#casaCorpo");
+  try{ return montarCasaInterno(box); }
+  catch(err){
+    console.error("tela falhou:",err);
+    casaNivel="turmas"; casaProva=null; casaTurma=null; substituindo=null;
+    try{ return telaTurmas(box); }
+    catch(e2){
+      box.innerHTML='<div class="aviso">Algo deu errado ao montar a tela. '+
+        'Recarregue a página — seus dados estão salvos.</div>'; }
+  }
+}
+function montarCasaInterno(box){
   if(casaNivel==="turmas")   return telaTurmas(box);
   if(casaNivel==="provas")   return telaProvas(box);
   if(casaNivel==="alunos")   return telaAlunos(box);
@@ -807,15 +819,19 @@ let iaImagens=[];      // figuras achadas no .docx, para anexar às questões
 
 function telaLerArquivo(box){
   const p=casaProva?provaDe(casaProva):null;    // sem prova = está criando uma
-  const t=turmaDe(casaTurma), temChave=!!lerChave();
+  const t=turmaDe(casaTurma)||(p?turmaDe(p.turma):null);
+  if(!t){ casaNivel="turmas"; return montarCasa(); }   // sem turma não há o que fazer
+  casaTurma=t.id;
+  const temChave=!!lerChave();
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${p?"Questões":esc(t.nome)}</button></div>
     <h2>${p?"Ler prova de um arquivo":"Subir prova pronta"}</h2>
-    <p class="sub">O resultado vai para a tela de questões para você conferir —
-      nada é salvo automaticamente.</p>
+    <p class="sub">Turma ${esc(t.nome)} · ${esc(t.disciplina)}. O resultado vai para
+      revisão — nada é salvo automaticamente.</p>
     <button class="btn sec" id="bEscolher">Escolher arquivo</button>
     <input type="file" id="iaArq" hidden
       accept="image/*,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
-    <p class="hint">Aceita foto (JPG, PNG), PDF e Word (.docx).</p>
+    <p class="hint">Aceita foto (JPG, PNG), PDF e Word (.docx). PDF e Word com texto
+      são lidos aqui mesmo, de graça.</p>
     <div id="iaInfo"></div>
     <div id="iaPreDoc"></div>
     <div class="rot">Caminho 1 — a Claude lê aqui no aparelho</div>
@@ -842,12 +858,14 @@ function telaLerArquivo(box){
     iaArquivo=null; iaTextoDoc=null; iaImagens=[];
     const ehDocx=/\.docx$/i.test(f.name)||/wordprocessingml/.test(f.type||"");
     if(ehDocx) return lerDocx(f,p);
+    const ehPdf=/\.pdf$/i.test(f.name)||/pdf/i.test(f.type||"");
     const r=new FileReader();
     r.onload=()=>{ iaArquivo={nome:f.name,tipo:f.type||"image/jpeg",
         b64:String(r.result).split(",")[1]};
       $("#iaInfo").innerHTML=`<div class="diag" style="margin-top:10px"><b>${esc(f.name)}</b>
         ${(f.size/1024).toFixed(0)} KB · pronto para leitura</div>`;
-      pintarPreDoc(p); };
+      pintarPreDoc(p);
+      if(ehPdf) lerPdfProva(f,p); };
     r.readAsDataURL(f);
   };
   pintarPreDoc(p);
@@ -858,6 +876,38 @@ function telaLerArquivo(box){
   };
   $("#bColar").onclick=()=>aplicarJson($("#iaJson").value,p);
   if($("#bIA")) $("#bIA").onclick=()=>chamarIA(p);
+}
+
+/* Extrai o texto de um PDF no próprio aparelho, preservando as linhas.
+   Serve tanto para a prova quanto para a lista de estudantes. */
+async function textoDePdf(arquivo){
+  if(typeof pdfjsLib==="undefined") throw new Error("faltou o arquivo pdf.min.js");
+  pdfjsLib.GlobalWorkerOptions.workerSrc="pdf.worker.min.js";
+  const dados=new Uint8Array(await arquivo.arrayBuffer());
+  /* Sem o pdf.worker.min.js no servidor, a leitura fica esperando para
+     sempre e a tela trava sem explicação. O limite converte isso em erro. */
+  const limite=new Promise((_,rej)=>setTimeout(()=>rej(new Error(
+    "a leitura do PDF não respondeu — confira se o arquivo pdf.worker.min.js "+
+    "foi enviado junto com o app")),25000));
+  const doc=await Promise.race([pdfjsLib.getDocument({data:dados}).promise,limite]);
+  const paginas=[];
+  for(let i=1;i<=doc.numPages;i++){
+    const pg=await doc.getPage(i), c=await pg.getTextContent();
+    let y=null, linha=[]; const linhas=[];
+    c.items.forEach(it=>{
+      const yy=Math.round(it.transform[5]);
+      if(y!==null && Math.abs(yy-y)>3){ linhas.push(linha.join("").trim()); linha=[]; }
+      y=yy; linha.push(it.str);
+    });
+    if(linha.length) linhas.push(linha.join("").trim());
+    paginas.push(linhas.filter(l=>l).join("\n"));
+  }
+  return paginas.join("\n");
+}
+async function textoDeDocx(arquivo){
+  if(typeof mammoth==="undefined") throw new Error("faltou o arquivo mammoth.browser.min.js");
+  const buf=await arquivo.arrayBuffer();
+  return (await mammoth.extractRawText({arrayBuffer:buf})).value||"";
 }
 
 async function lerDocx(f,p){
@@ -882,6 +932,27 @@ async function lerDocx(f,p){
   }
 }
 
+/* PDF de texto (como os gerados por computador) também pode ser lido de
+   graça aqui. PDF que é só imagem escaneada não devolve texto — aí a IA
+   ou o chat continuam sendo o caminho. */
+async function lerPdfProva(f,p){
+  const info=t=>{ const el=$("#iaInfo"); if(el) el.innerHTML=t; };
+  try{
+    const txt=await textoDePdf(f);
+    const util=txt.split(/\r?\n/).filter(l=>l.trim()).length;
+    if(util<3){
+      info(`<div class="diag" style="margin-top:10px"><b>${esc(f.name)}</b>
+        PDF sem texto — parece digitalizado. Use a leitura pela Claude abaixo.</div>`);
+      return; }
+    iaTextoDoc=txt; iaImagens=[];
+    info(`<div class="diag" style="margin-top:10px"><b>${esc(f.name)}</b>
+      ${util} linhas de texto · lido no próprio aparelho</div>`);
+    pintarPreDoc(p);
+  }catch(e){
+    console.warn("PDF sem texto extraível",e);
+  }
+}
+
 /* Um .docx já vem em texto. Se ele estiver no formato de prova, dá para
    montar as questões sem IA nenhuma — de graça e na hora. */
 function pintarPreDoc(p){
@@ -889,7 +960,7 @@ function pintarPreDoc(p){
   if(!iaTextoDoc){ box.innerHTML=""; return; }
   const achadas=lerQuestoes(iaTextoDoc);
   const bate=p?(achadas.questoes.length===p.nq):(achadas.questoes.length>=5);
-  box.innerHTML=`<div class="rot">Caminho 0 — sem IA, direto do Word</div>
+  box.innerHTML=`<div class="rot">Caminho 0 — sem IA, direto do arquivo</div>
     <div class="${bate?"diag":"aviso"}">
       ${bate?`<b>Encontrei ${achadas.questoes.length} questões</b>Dá para usar sem gastar nada.`
             :(p?`Reconheci <b>${achadas.questoes.length}</b> questões no texto, e a prova tem
@@ -897,7 +968,7 @@ function pintarPreDoc(p){
                :`Reconheci só <b>${achadas.questoes.length}</b> questões — o documento pode não
                  estar no formato numerado. Tente a leitura por IA abaixo.`)}
     </div>
-    <button class="btn${bate?"":" gho"}" id="bDireto" style="margin-top:9px">Usar o texto do Word</button>
+    <button class="btn${bate?"":" gho"}" id="bDireto" style="margin-top:9px">Usar o texto do arquivo</button>
     ${iaImagens.length?`<p class="hint">${iaImagens.length===1?"A imagem encontrada no documento fica guardada"
       :"As "+iaImagens.length+" imagens do documento ficam guardadas"}
       para você anexar em “Figuras das questões”.</p>`:""}`;
@@ -1027,6 +1098,7 @@ function comprimirImagem(arquivo){
 
 function telaFiguras(box){
   const p=provaDe(casaProva);
+  if(!p){ casaNivel="turmas"; return montarCasa(); }
   const qs=p.questoes||[];
   if(!qs.length){
     box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(p.codigo)}</button></div>
@@ -1103,6 +1175,7 @@ function discursivasParaTexto(ds){
 }
 function telaDiscursivas(box){
   const p=provaDe(casaProva);
+  if(!p){ casaNivel="turmas"; return montarCasa(); }
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(p.codigo)}</button></div>
     <h2>Questões discursivas</h2>
     <p class="sub">Vão na Parte II da prova, fora do cartão. Você digita a nota
@@ -1141,7 +1214,9 @@ function telaDiscursivas(box){
 
 /* ── fechamento: média das provas do período, por estudante ─────── */
 function telaEditar(box){
-  const p=provaDe(casaProva), t=turmaDe(p.turma), n=resDa(p.id).length;
+  const p=provaDe(casaProva);
+  if(!p){ casaNivel="turmas"; return montarCasa(); }
+  const t=turmaDe(p.turma), n=resDa(p.id).length;
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(p.codigo)}</button></div>
     <h2>Editar a prova</h2>
     <p class="sub">Turma ${esc(t.nome)}${n?` · ${n} estudante${n===1?"":"s"} já corrigido${n===1?"":"s"}`:""}</p>
@@ -1204,6 +1279,7 @@ function telaEditar(box){
 
 function telaFechamento(box){
   const t=turmaDe(casaTurma);
+  if(!t){ casaNivel="turmas"; return montarCasa(); }
   const ps=provasDoPeriodo(t.id,casaPeriodo).slice().reverse();  // ordem cronológica
   const comNota=ps.filter(p=>resDa(p.id).length);
   let h=`<div class="migalha"><button id="mVolta">‹ ${esc(t.nome)}</button></div>
@@ -1306,7 +1382,10 @@ function telaConfig(box){
 let casaProva=null, casaPeriodo=1, ultimoPeriodo=1, substituindo=null;
 
 function telaProva(box){
-  const p=provaDe(casaProva), t=turmaDe(p.turma);
+  const p=provaDe(casaProva);
+  if(!p){ casaNivel="turmas"; return montarCasa(); }
+  const t=turmaDe(p.turma);
+  if(!t){ casaNivel="turmas"; return montarCasa(); }
   const nq=(p.questoes||[]).length, corrigidos=resDa(p.id).length;
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(t.nome)}</button></div>
     <h2>${esc(p.titulo||p.codigo)}</h2>
@@ -1410,6 +1489,7 @@ function questoesParaTexto(qs){
 
 function telaQuestoes(box){
   const p=provaDe(casaProva);
+  if(!p){ casaNivel="turmas"; return montarCasa(); }
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(p.codigo)}</button></div>
     <h2>Questões da prova</h2>
     <p class="sub">Digite ou cole no formato de sempre. Marque a correta com
@@ -1559,7 +1639,9 @@ function telaTurmas(box){
 }
 
 function telaProvas(box){
-  const t=turmaDe(casaTurma), e=escolaDe(t.escola), ps=provasDaTurma(t.id);
+  const t=turmaDe(casaTurma);
+  if(!t){ casaNivel="turmas"; return montarCasa(); }
+  const e=escolaDe(t.escola)||{curto:""}, ps=provasDaTurma(t.id);
   let h=`<div class="migalha"><button id="mVolta">‹ Turmas</button><span>·</span><span>${esc(e.curto)}</span></div>
     <h2>${esc(t.nome)} · ${esc(t.disciplina)}</h2>
     <p class="sub">${esc(t.serie)} · ${t.alunos.length} estudante${t.alunos.length===1?"":"s"} ·
@@ -1612,6 +1694,7 @@ function telaProvas(box){
 /* ── estudantes ─────────────────────────────────────────────────── */
 function telaAlunos(box){
   const t=turmaDe(casaTurma);
+  if(!t){ casaNivel="turmas"; return montarCasa(); }
   const ativos=(t.alunos||[]).filter(ativo), saidos=(t.alunos||[]).filter(a=>!ativo(a));
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(t.nome)}</button></div>
     <h2>Estudantes · ${esc(t.nome)}</h2>
@@ -1627,12 +1710,14 @@ function telaAlunos(box){
     <div id="alLista"></div>
     <div class="rot">Substituir a lista inteira</div>
     <p class="hint" style="margin-top:0">Um por linha: <b>07 Maria Silva</b>, <b>07;Maria Silva</b>
-      ou só o nome. Quem já tem notas nunca é apagado — vira transferido.</p>
+      ou só o nome. Aceita importar <b>PDF</b>, <b>Word</b>, CSV, TXT ou JSON.
+      Quem já tem notas nunca é apagado — vira transferido.</p>
     <textarea id="txAlunos" spellcheck="false" style="margin-top:9px"></textarea>
     <div class="duo" style="margin-top:11px">
       <button class="btn sec" id="bArqAl">Importar arquivo</button>
       <button class="btn gho" id="bSalvaAl">Substituir lista</button></div>
-    <input type="file" id="arqAl" accept=".json,.csv,.txt" hidden>
+    <input type="file" id="arqAl" hidden
+      accept=".json,.csv,.txt,.docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
     <div id="alAviso"></div>`;
   $("#txAlunos").value=ativos.map(a=>a.numero+" "+a.nome).join("\n");
 
@@ -1681,10 +1766,31 @@ function telaAlunos(box){
     salvar(); telaAlunos(box); montarManual(); pintarResultados(); };
 
   $("#bArqAl").onclick=()=>$("#arqAl").click();
-  $("#arqAl").onchange=ev=>{
+  $("#arqAl").onchange=async ev=>{
     const f=ev.target.files[0]; ev.target.value=""; if(!f) return;
+    const av=t2=>{ const el=$("#alAviso"); if(el) el.innerHTML=t2; };
+    const ehPdf=/\.pdf$/i.test(f.name)||/pdf/i.test(f.type||"");
+    const ehDocx=/\.docx$/i.test(f.name)||/wordprocessingml/.test(f.type||"");
+    if(ehPdf||ehDocx){
+      av('<div class="diag" style="margin-top:11px">Abrindo o arquivo…</div>');
+      try{
+        const txt=ehPdf?await textoDePdf(f):await textoDeDocx(f);
+        const lista=lerListaAlunos(limparListaBruta(txt));
+        if(!lista.length){
+          av(`<div class="aviso" style="margin-top:11px">Não achei nomes em
+            <b>${esc(f.name)}</b>. Se for um PDF digitalizado, ele não tem texto —
+            copie a lista à mão ou use uma foto com a leitura pela Claude.</div>`);
+          return; }
+        $("#txAlunos").value=lista.map(a=>a.numero+" "+a.nome).join("\n");
+        av(`<div class="diag" style="margin-top:11px"><b>${lista.length} nomes encontrados</b>
+          Confira a lista abaixo e toque em “Substituir lista”.</div>`);
+      }catch(e){
+        av(`<div class="aviso" style="margin-top:11px">Não consegui abrir: ${esc(e.message)}</div>`); }
+      return;
+    }
     const r=new FileReader();
-    r.onload=()=>{ $("#txAlunos").value=textoDeArquivo(r.result,f.name,t.nome); };
+    r.onload=()=>{ $("#txAlunos").value=textoDeArquivo(r.result,f.name,t.nome);
+      av('<div class="diag" style="margin-top:11px">Arquivo lido. Confira antes de substituir.</div>'); };
     r.readAsText(f); };
 
   $("#bSalvaAl").onclick=()=>{
@@ -1723,6 +1829,21 @@ function textoDeArquivo(txt,nome,nomeTurma){
   }
   return txt;
 }
+/* Listas de chamada vêm com cabeçalho, rodapé e colunas extras.
+   Fica só o que parece nome de estudante. */
+function limparListaBruta(txt){
+  const fora=new RegExp("(rela[çc][ãa]o|lista|escola|turma|s[ée]rie|disciplina|professor"+
+    "|ano letivo|p[áa]gina|total de|n[ºo°]?\\s*ordem|nome do aluno|matr[íi]cula"+
+    "|assinatura|data)","i");
+  return String(txt).split(/\r?\n/).filter(l=>{
+    const t=l.trim();
+    if(!t) return false;
+    if(t.length<4) return false;
+    if(fora.test(t) && !/^\d{1,3}[\s;,.\-]/.test(t)) return false;   // cabeçalho
+    if(!/[A-Za-zÀ-ÿ]{3}/.test(t)) return false;                        // sem palavra
+    return true;
+  }).join("\n");
+}
 function lerListaAlunos(txt){
   const out=[]; let auto=0;
   String(txt).split(/\r?\n/).forEach(l=>{
@@ -1744,6 +1865,7 @@ function lerListaAlunos(txt){
 /* ── nova prova ─────────────────────────────────────────────────── */
 function telaNovaProva(box){
   const t=turmaDe(casaTurma);
+  if(!t){ casaNivel="turmas"; return montarCasa(); }
   const F=casaForm||(casaForm={codigo:"",titulo:"",nq:10,no:5,gab:"",habs:"",po:10,pd:0,per:ultimoPeriodo});
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(t.nome)}</button></div>
     <h2>${F.substitui?"Substituir a prova":(F.vindoDeArquivo?"Confirmar a prova lida":"Nova prova")}</h2>
@@ -2363,6 +2485,7 @@ $("#bTrocar").onclick=()=>{ casaNivel="turmas"; irPara("casa"); };
   if(typeof gerarProvas!=="function") faltando.push("gerador.js");
   if(typeof registrarFontes!=="function") faltando.push("fonte.js");
   if(typeof mammoth==="undefined") faltando.push("mammoth.browser.min.js");
+  if(typeof pdfjsLib==="undefined") faltando.push("pdf.min.js");
   if(faltando.length){
     const d=document.createElement("div");
     d.className="aviso";
