@@ -764,9 +764,10 @@ let iaTextoDoc=null;   // texto extraído de um .docx, aqui mesmo no aparelho
 let iaImagens=[];      // figuras achadas no .docx, para anexar às questões
 
 function telaLerArquivo(box){
-  const p=provaDe(casaProva), temChave=!!lerChave();
-  box.innerHTML=`<div class="migalha"><button id="mVolta">‹ Questões</button></div>
-    <h2>Ler prova de um arquivo</h2>
+  const p=casaProva?provaDe(casaProva):null;    // sem prova = está criando uma
+  const t=turmaDe(casaTurma), temChave=!!lerChave();
+  box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${p?"Questões":esc(t.nome)}</button></div>
+    <h2>${p?"Ler prova de um arquivo":"Subir prova pronta"}</h2>
     <p class="sub">O resultado vai para a tela de questões para você conferir —
       nada é salvo automaticamente.</p>
     <button class="btn sec" id="bEscolher">Escolher arquivo</button>
@@ -790,7 +791,7 @@ function telaLerArquivo(box){
       placeholder='Cole aqui o JSON: {"questoes":[...]}'></textarea>
     <button class="btn" id="bColar" style="margin-top:10px">Usar este JSON</button>
     <div id="iaErro"></div>`;
-  $("#mVolta").onclick=()=>{casaNivel="questoes";montarCasa();};
+  $("#mVolta").onclick=()=>{casaNivel=p?"questoes":"provas";montarCasa();};
   $("#bEscolher").onclick=()=>$("#iaArq").click();
   if($("#bConfig")) $("#bConfig").onclick=()=>{casaNivel="config";montarCasa();};
   $("#iaArq").onchange=async ev=>{
@@ -808,7 +809,7 @@ function telaLerArquivo(box){
   };
   pintarPreDoc(p);
   $("#bCopiar").onclick=()=>{
-    const t=INSTRUCAO+"\n\nA prova tem "+p.nq+" questões e "+p.no+" alternativas.";
+    const t=INSTRUCAO+(p?"\n\nA prova tem "+p.nq+" questões e "+p.no+" alternativas.":"");
     if(navigator.clipboard) navigator.clipboard.writeText(t);
     $("#iaErro").innerHTML='<div class="diag" style="margin-top:10px"><b>Copiado</b>Cole no chat junto com o arquivo da prova.</div>';
   };
@@ -843,12 +844,14 @@ function pintarPreDoc(p){
   const box=$("#iaPreDoc"); if(!box) return;
   if(!iaTextoDoc){ box.innerHTML=""; return; }
   const achadas=lerQuestoes(iaTextoDoc);
-  const bate=achadas.questoes.length===p.nq;
+  const bate=p?(achadas.questoes.length===p.nq):(achadas.questoes.length>=5);
   box.innerHTML=`<div class="rot">Caminho 0 — sem IA, direto do Word</div>
     <div class="${bate?"diag":"aviso"}">
-      ${bate?`<b>Encontrei as ${achadas.questoes.length} questões</b>Dá para usar sem gastar nada.`
-            :`Reconheci <b>${achadas.questoes.length}</b> questões no texto, e a prova tem
-              <b>${p.nq}</b>. Você pode usar assim mesmo e ajustar, ou mandar para a IA abaixo.`}
+      ${bate?`<b>Encontrei ${achadas.questoes.length} questões</b>Dá para usar sem gastar nada.`
+            :(p?`Reconheci <b>${achadas.questoes.length}</b> questões no texto, e a prova tem
+               <b>${p.nq}</b>. Você pode usar assim mesmo e ajustar, ou mandar para a IA abaixo.`
+               :`Reconheci só <b>${achadas.questoes.length}</b> questões — o documento pode não
+                 estar no formato numerado. Tente a leitura por IA abaixo.`)}
     </div>
     <button class="btn${bate?"":" gho"}" id="bDireto" style="margin-top:9px">Usar o texto do Word</button>
     ${iaImagens.length?`<p class="hint">${iaImagens.length===1?"A imagem encontrada no documento fica guardada"
@@ -856,8 +859,10 @@ function pintarPreDoc(p){
       para você anexar em “Figuras das questões”.</p>`:""}`;
   // entrega o texto JÁ normalizado: o que aparece no editor é o que será salvo
   $("#bDireto").onclick=()=>{
-    iaTexto=questoesParaTexto(lerQuestoes(iaTextoDoc).questoes) || iaTextoDoc;
-    casaNivel="questoes"; montarCasa(); };
+    const achadas=lerQuestoes(iaTextoDoc);
+    const no=p?p.no:Math.max(4,Math.min(5,
+      achadas.questoes.reduce((m,q)=>Math.max(m,(q.alternativas||[]).length),5)));
+    entregarLeitura(questoesParaTexto(achadas.questoes)||iaTextoDoc, p, no); };
 }
 
 function extrairJson(txt){
@@ -877,13 +882,33 @@ function jsonParaTexto(dados,no){
 }
 function aplicarJson(txt,p){
   try{
-    const texto=jsonParaTexto(extrairJson(txt),p.no);
-    iaTexto=texto; casaNivel="questoes"; montarCasa();
+    const dados=extrairJson(txt);
+    const no=p?p.no:alternativasDe(dados);
+    entregarLeitura(jsonParaTexto(dados,no),p,no);
   }catch(e){
     $("#iaErro").innerHTML=`<div class="aviso" style="margin-top:10px">Não consegui usar: ${esc(e.message)}</div>`;
   }
 }
 let iaTexto=null;   // texto vindo da leitura, para a tela de questões exibir
+
+const alternativasDe=d=>{
+  const qs=(d&&d.questoes)||d||[];
+  const m=(qs||[]).reduce((x,q)=>Math.max(x,((q.alternativas)||[]).length),0);
+  return m>=5?5:(m>=4?4:5);
+};
+
+/* Se já existe prova, o texto vai para a revisão dela. Se não existe,
+   vai para o cadastro com número de questões, alternativas e gabarito
+   já preenchidos pela leitura — que é o caminho de quem começa do arquivo. */
+function entregarLeitura(texto,p,no){
+  iaTexto=texto;
+  if(p){ casaNivel="questoes"; montarCasa(); return; }
+  const lidas=lerQuestoes(texto);
+  casaForm={codigo:"",titulo:"",nq:Math.max(5,Math.min(30,lidas.questoes.length||10)),
+    no:no||5, gab:lidas.gabarito.indexOf("?")<0?lidas.gabarito:"",
+    habs:"", po:10, pd:0, per:ultimoPeriodo, vindoDeArquivo:true};
+  casaNivel="nova"; montarCasa();
+}
 
 async function chamarIA(p){
   const st=$("#iaStatus");
@@ -903,7 +928,7 @@ async function chamarIA(p){
         "anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
       body:JSON.stringify({model:lerModelo(),max_tokens:8000,
         messages:[{role:"user",content:[bloco,{type:"text",
-          text:INSTRUCAO+"\n\nA prova tem "+p.nq+" questões e "+p.no+" alternativas."}]}]})
+          text:INSTRUCAO+(p?"\n\nA prova tem "+p.nq+" questões e "+p.no+" alternativas.":"")}]}]})
     });
     if(!resp.ok){
       const e=await resp.text();
@@ -912,11 +937,12 @@ async function chamarIA(p){
     const dados=await resp.json();
     const texto=(dados.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n");
     const u=dados.usage||{};
-    iaTexto=jsonParaTexto(extrairJson(texto),p.no);
+    const lido=extrairJson(texto), no=p?p.no:alternativasDe(lido);
+    const pronto=jsonParaTexto(lido,no);
     st.innerHTML=`<div class="diag" style="margin-top:10px"><b>Leitura concluída</b>
       ${u.input_tokens||"?"} tokens de entrada, ${u.output_tokens||"?"} de saída.
       Confira o texto antes de salvar.</div>`;
-    setTimeout(()=>{casaNivel="questoes";montarCasa();},600);
+    setTimeout(()=>entregarLeitura(pronto,p,no),600);
   }catch(err){
     st.innerHTML=`<div class="aviso" style="margin-top:10px">Falhou: ${esc(err.message)}<br>
       Você ainda pode usar o caminho pelo chat, abaixo.</div>`;
@@ -1440,11 +1466,15 @@ function telaProvas(box){
     if(soltas.length) h+=`<div class="grupo"><div class="esc"><span class="nm">Fora do calendário</span>
       <span class="ln"></span></div>`+soltas.map(cartaoProva).join("")+"</div>";
   }
-  h+='<button class="btn" id="bNova" style="margin-top:14px">Nova prova</button>';
+  h+=`<button class="btn" id="bSubir" style="margin-top:14px">Subir prova pronta</button>
+      <p class="hint">Foto, PDF ou Word — o app lê as questões e já preenche o cadastro.</p>
+      <button class="btn gho" id="bNova" style="margin-top:10px">Criar prova em branco</button>`;
   box.innerHTML=h;
   $("#mVolta").onclick=()=>{casaNivel="turmas";montarCasa();};
   $("#bAlunos").onclick=()=>{casaNivel="alunos";montarCasa();};
   $("#bNova").onclick=()=>{casaForm=null;casaNivel="nova";montarCasa();};
+  $("#bSubir").onclick=()=>{casaProva=null;casaForm=null;
+    iaArquivo=null;iaTextoDoc=null;iaImagens=[];casaNivel="ler";montarCasa();};
   box.querySelectorAll("[data-fech]").forEach(b=>b.onclick=(ev)=>{
     ev.stopPropagation(); casaPeriodo=+b.dataset.fech; casaNivel="fechamento"; montarCasa(); });
   box.querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{
@@ -1517,7 +1547,12 @@ function telaNovaProva(box){
   const t=turmaDe(casaTurma);
   const F=casaForm||(casaForm={codigo:"",titulo:"",nq:10,no:5,gab:"",habs:"",po:10,pd:0,per:ultimoPeriodo});
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(t.nome)}</button></div>
-    <h2>Nova prova</h2><p class="sub">Turma ${esc(t.nome)} · ${esc(t.disciplina)}</p>
+    <h2>${F.vindoDeArquivo?"Confirmar a prova lida":"Nova prova"}</h2>
+    <p class="sub">Turma ${esc(t.nome)} · ${esc(t.disciplina)}</p>
+    ${F.vindoDeArquivo?`<div class="diag">Li <b>${F.nq}</b> questões com
+      <b>${F.no}</b> alternativas${F.gab?` e o gabarito <b>${esc(F.gab)}</b>`:
+      `. Não achei o gabarito no arquivo — digite abaixo`}.
+      Dê um código à prova e confirme; as questões já entram junto.</div>`:""}
     <label>Código da prova</label>
     <input id="fCod" class="mono" placeholder="3A-AV2" value="${esc(F.codigo)}">
     <label>Título</label>
@@ -1577,6 +1612,12 @@ Volume do prisma">${esc(F.habs)}</textarea>
     const p={id:uid("p"),turma:t.id,codigo:F.codigo,titulo:F.titulo,
       nq:F.nq,no:F.no,gabC:F.gab,habs,pontosObj:F.po,pontosDisc:F.pd,periodo:F.per||1,
       questoes:[],discursivas:[],criada:Date.now()};
+    if(F.vindoDeArquivo && iaTexto){
+      const lidas=lerQuestoes(iaTexto);
+      p.questoes=lidas.questoes.slice(0,p.nq).map(q=>({enunciado:q.enunciado,
+        alternativas:(q.alternativas||[]).slice(0,p.no),correta:q.correta,imagem:null}));
+      iaTexto=null;
+    }
     E.provas.push(p); ultimoPeriodo=p.periodo; casaForm=null; ativar(p.id);
     casaProva=p.id; casaNivel="prova"; montarCasa();
   };
