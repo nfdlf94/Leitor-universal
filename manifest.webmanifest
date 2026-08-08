@@ -1,0 +1,15 @@
+{
+  "name": "Leitor de Cartão · Desbugando a Matemática",
+  "short_name": "Leitor DBM",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#071324",
+  "theme_color": "#071324",
+  "icons": [{
+    "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='104' fill='%230E2145'/%3E%3Cg fill='none' stroke='%23F97316' stroke-width='30' stroke-linecap='round'%3E%3Cpath d='M112 176v-40a24 24 0 0 1 24-24h40M336 112h40a24 24 0 0 1 24 24v40M400 336v40a24 24 0 0 1-24 24h-40M176 400h-40a24 24 0 0 1-24-24v-40'/%3E%3C/g%3E%3Ccircle cx='196' cy='256' r='30' fill='%23F2F4F8'/%3E%3Ccircle cx='316' cy='256' r='30' fill='%23F97316'/%3E%3C/svg%3E",
+    "sizes": "512x512",
+    "type": "image/svg+xml",
+    "purpose": "any"
+  }]
+}

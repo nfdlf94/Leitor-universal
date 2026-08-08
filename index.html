@@ -1,0 +1,1539 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
+<meta name="theme-color" content="#071324">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Correção de Provas · Desbugando a Matemática</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#071324; --navy:#0E2145; --slate:#17294A; --line:#243B64;
+  --orange:#F97316; --amber:#FBBF24; --mint:#34D399; --coral:#FB5A5A;
+  --paper:#F2F4F8; --mute:#7E93B8;
+  --sans:'IBM Plex Sans',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden}
+body{background:var(--ink);color:var(--paper);font-family:var(--sans);font-size:15px;
+  line-height:1.45;overscroll-behavior:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+input,textarea,select{font:inherit;color:var(--paper);background:var(--navy);
+  border:1px solid var(--line);border-radius:10px;padding:11px 13px;width:100%}
+input:focus,textarea:focus,select:focus{outline:2px solid var(--orange);outline-offset:1px}
+:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+
+#app{display:flex;flex-direction:column;height:100dvh}
+#views{flex:1;position:relative;overflow:hidden}
+.view{position:absolute;inset:0;overflow-y:auto;display:none;
+  padding:14px 14px calc(20px + env(safe-area-inset-bottom))}
+.view.on{display:block}
+#v-ler{padding:0;overflow:hidden}
+
+nav{display:flex;background:var(--navy);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom);flex:0 0 auto}
+nav button{flex:1;padding:10px 2px 12px;display:flex;flex-direction:column;align-items:center;
+  gap:3px;color:var(--mute);font-size:9px;letter-spacing:.06em;text-transform:uppercase;
+  font-weight:600;border-top:2px solid transparent;margin-top:-1px;position:relative}
+nav button.on{color:var(--orange);border-top-color:var(--orange)}
+nav svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+nav .pill{position:absolute;top:5px;left:56%;background:var(--orange);color:var(--ink);
+  font-family:var(--mono);font-size:9px;font-weight:700;min-width:15px;padding:0 4px;
+  border-radius:8px;line-height:1.5}
+
+#palco{position:absolute;inset:0;background:#000;overflow:hidden}
+#video,#over{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:100%;height:100%}
+#video{object-fit:cover}
+#faixa{position:absolute;top:0;left:0;right:0;
+  padding:calc(10px + env(safe-area-inset-top)) 14px 22px;
+  background:linear-gradient(#071324f2,#07132400);display:flex;gap:11px;align-items:flex-start}
+#faixa .dot{width:9px;height:9px;border-radius:50%;background:var(--amber);margin-top:6px;
+  flex:0 0 auto;animation:pulso 1.6s infinite}
+@keyframes pulso{0%{box-shadow:0 0 0 0 #fbbf2466}70%{box-shadow:0 0 0 9px #fbbf2400}100%{box-shadow:0 0 0 0 #fbbf2400}}
+#faixa .t{font-weight:600;font-size:14.5px;line-height:1.3}
+#faixa .s{color:var(--mute);font-size:12px;font-family:var(--mono);margin-top:2px}
+#grade{position:absolute;right:11px;bottom:96px;background:#071324e0;border:1px solid var(--line);
+  border-radius:13px;padding:9px 8px;backdrop-filter:blur(7px);display:grid;
+  grid-template-columns:auto repeat(5,14px);gap:3px;font-family:var(--mono);font-size:9.5px;
+  align-items:center}
+#grade .h{color:var(--mute);text-align:center;font-size:8.5px}
+#grade .q{color:var(--mute);font-size:9px;padding-right:3px;text-align:right}
+#grade i{width:14px;height:11px;border-radius:3px;background:#1b3055;display:block}
+#grade i.on{background:var(--orange)} #grade i.lk{background:var(--mint)}
+#rodape{position:absolute;left:0;right:0;bottom:0;padding:14px;
+  background:linear-gradient(#07132400,#071324f2 40%)}
+
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:15px;
+  border-radius:13px;font-weight:600;font-size:15.5px;background:var(--orange);color:#231000;
+  transition:transform .1s}
+.btn:active{transform:scale(.98)}
+.btn.sec{background:var(--slate);color:var(--paper);border:1px solid var(--line)}
+.btn.gho{background:none;color:var(--mute);border:1px solid var(--line)}
+.btn[disabled]{opacity:.4;pointer-events:none}
+.linha{display:flex;gap:9px}
+
+#painel{position:absolute;inset:0;background:var(--ink);z-index:20;display:none;
+  flex-direction:column;padding:0 14px calc(14px + env(safe-area-inset-bottom));overflow-y:auto}
+#painel.on{display:flex}
+#nota{display:flex;align-items:baseline;gap:11px;padding:20px 0 4px}
+#nota b{font-family:var(--mono);font-size:54px;font-weight:600;line-height:.9;letter-spacing:-.04em}
+#nota span{color:var(--mute);font-family:var(--mono);font-size:13px}
+.rot{color:var(--mute);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;
+  font-weight:600;margin:22px 0 9px}
+#conf,#manGrade{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:7px}
+.qc{background:var(--navy);border:1px solid var(--line);border-radius:11px;padding:8px 5px 9px;
+  text-align:center}
+.qc .n{font-family:var(--mono);font-size:9.5px;color:var(--mute)}
+.qc .a{font-family:var(--mono);font-size:23px;font-weight:600;line-height:1.15}
+.qc .g{font-family:var(--mono);font-size:9.5px;color:var(--mute)}
+.qc.ok{border-color:#34d39955} .qc.ok .a{color:var(--mint)}
+.qc.no{border-color:#fb5a5a55} .qc.no .a{color:var(--coral)}
+.qc.vz .a{color:var(--mute)}
+
+.card{background:var(--navy);border:1px solid var(--line);border-radius:15px;padding:14px;
+  margin-bottom:11px}
+.card h3{margin:0 0 4px;font-size:15px;font-weight:600}
+.card p{margin:0;color:var(--mute);font-size:12.5px}
+label{display:block;color:var(--mute);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
+  font-weight:600;margin:13px 0 6px}
+.mono{font-family:var(--mono);letter-spacing:.14em;text-transform:uppercase}
+h2{font-size:20px;font-weight:600;margin:6px 0 3px}
+.sub{color:var(--mute);font-size:12.5px;margin:0 0 16px}
+
+.aluno{display:flex;align-items:center;gap:11px;padding:11px 12px;background:var(--navy);
+  border:1px solid var(--line);border-radius:12px;margin-bottom:7px;width:100%;text-align:left}
+.aluno .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.aluno .rs{font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:.08em}
+.aluno .nt{font-family:var(--mono);font-size:19px;font-weight:600}
+
+.barra{display:flex;align-items:center;gap:9px;margin-bottom:6px}
+.barra .q{font-family:var(--mono);font-size:10.5px;color:var(--mute);width:26px;flex:0 0 auto}
+.barra .lb{font-size:11.5px;color:var(--paper);flex:0 0 118px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.barra .t{flex:1;height:18px;background:var(--slate);border-radius:5px;overflow:hidden}
+.barra .f{height:100%;background:var(--mint);border-radius:5px;transition:width .5s}
+.barra .f.baixo{background:var(--coral)} .barra .f.medio{background:var(--amber)}
+.barra .p{font-family:var(--mono);font-size:11px;width:36px;text-align:right;flex:0 0 auto}
+
+.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:11px}
+.kpi div{background:var(--navy);border:1px solid var(--line);border-radius:13px;padding:11px 10px}
+.kpi .v{font-family:var(--mono);font-size:23px;font-weight:600;line-height:1.1}
+.kpi .l{color:var(--mute);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;
+  font-weight:600;margin-top:2px}
+
+.vazio{text-align:center;padding:52px 22px;color:var(--mute)}
+.vazio b{display:block;color:var(--paper);font-size:16px;font-weight:600;margin-bottom:5px}
+.aviso{background:#f9731618;border:1px solid #f9731644;color:#FDBA74;border-radius:11px;
+  padding:10px 12px;font-size:12.5px;margin-bottom:11px}
+.diag{background:var(--navy);border:1px solid var(--line);border-left:3px solid var(--orange);
+  border-radius:11px;padding:12px 13px;margin-bottom:9px;font-size:13px}
+.diag b{display:block;font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--orange);margin-bottom:5px}
+.diag ul{margin:5px 0 0;padding-left:17px} .diag li{margin-bottom:3px}
+
+.opt{display:grid;grid-template-columns:auto repeat(5,1fr);gap:5px;align-items:center;
+  margin-bottom:5px}
+.opt .qn{font-family:var(--mono);font-size:11px;color:var(--mute);width:24px}
+.opt button{border:1px solid var(--line);background:var(--navy);border-radius:9px;padding:9px 0;
+  font-family:var(--mono);font-size:13px;font-weight:600;color:var(--mute)}
+.opt button.sel{background:var(--orange);border-color:var(--orange);color:#231000}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* ── acréscimos da versão universal ───────────────────────────── */
+#barra{flex:0 0 auto;background:var(--navy);border-bottom:1px solid var(--line);
+  padding:calc(9px + env(safe-area-inset-top)) 14px 9px;display:flex;align-items:center;gap:10px}
+#barra .ctx{flex:1;min-width:0}
+#barra .l1{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#barra .l2{color:var(--mute);font-size:10.5px;font-family:var(--mono);letter-spacing:.06em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+#barra .tr{background:var(--slate);border:1px solid var(--line);border-radius:9px;
+  padding:7px 11px;font-size:11.5px;color:var(--paper);font-weight:600;flex:0 0 auto}
+#barra.off .l1{color:var(--mute);font-weight:500}
+
+.grupo{margin-bottom:20px}
+.grupo>.esc{display:flex;align-items:center;gap:8px;margin:0 0 8px}
+.grupo>.esc .nm{font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  font-weight:700;color:var(--orange)}
+.grupo>.esc .ln{flex:1;height:1px;background:var(--line)}
+
+.item{display:flex;align-items:center;gap:11px;padding:12px 13px;background:var(--navy);
+  border:1px solid var(--line);border-radius:12px;margin-bottom:7px;width:100%;text-align:left}
+.item.sel{border-color:var(--orange);background:#f973160f}
+.item .cor{flex:1;min-width:0}
+.item .t1{font-size:14.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .t2{color:var(--mute);font-size:11.5px;margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .ch{color:var(--mute);font-size:19px;flex:0 0 auto}
+.item .tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.07em;padding:3px 7px;
+  border-radius:7px;background:var(--slate);color:var(--mute);flex:0 0 auto}
+.item .tag.ok{background:#34d39922;color:var(--mint)}
+.item .tag.par{background:#fbbf2422;color:var(--amber)}
+
+.migalha{display:flex;align-items:center;gap:6px;color:var(--mute);font-size:11.5px;
+  margin-bottom:12px;flex-wrap:wrap}
+.migalha button{color:var(--orange);font-weight:600;font-size:11.5px}
+.hint{color:var(--mute);font-size:12px;margin:9px 0 0;line-height:1.5}
+textarea{min-height:132px;resize:vertical;font-family:var(--mono);font-size:12.5px;
+  letter-spacing:.02em;line-height:1.6}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.chip{display:inline-flex;align-items:center;gap:5px;background:var(--slate);
+  border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:11.5px;
+  margin:0 6px 6px 0;font-family:var(--mono)}
+.chip b{color:var(--orange);font-weight:600}
+#gabGrade{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:6px}
+.gq{background:var(--navy);border:1px solid var(--line);border-radius:10px;
+  padding:6px 4px 7px;text-align:center}
+.gq .n{font-family:var(--mono);font-size:9px;color:var(--mute)}
+.gq .a{font-family:var(--mono);font-size:19px;font-weight:600;color:var(--orange);line-height:1.2}
+</style>
+</head>
+<body>
+<div id="app">
+
+<div id="barra" class="off">
+  <div class="ctx"><div class="l1" id="bCtx1">Nenhuma prova selecionada</div>
+    <div class="l2" id="bCtx2">Comece pela aba Turmas</div></div>
+  <button class="tr" id="bTrocar">Trocar</button>
+</div>
+
+<div id="views">
+
+<!-- ══════════ TURMAS / PROVAS ══════════ -->
+<section id="v-casa" class="view on">
+  <div id="casaCorpo"></div>
+</section>
+
+<!-- ══════════ LER ══════════ -->
+<section id="v-ler" class="view">
+  <div id="palco">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="over"></canvas>
+    <div id="faixa"><span class="dot" id="dot"></span><div style="flex:1">
+      <div class="t" id="ftit">Toque em iniciar câmera</div>
+      <div class="s" id="fsub">O QR do cartão traz aluno e gabarito</div></div></div>
+    <div id="grade" hidden></div>
+    <div id="rodape">
+      <div class="linha" id="acoes"><button class="btn" id="bIniciar">Iniciar câmera</button></div>
+      <div class="linha" id="acoes2" style="margin-top:9px;display:none">
+        <button class="btn gho" id="bFoto">Usar foto</button>
+        <button class="btn gho" id="bParar">Parar</button></div>
+      <input type="file" id="arq" accept="image/*" hidden>
+    </div>
+  </div>
+  <div id="painel">
+    <div id="nota"><b id="ntv">0</b><span id="ntd"></span></div>
+    <div id="boxAluno"></div>
+    <div class="aviso" id="avAmb" hidden></div>
+    <div class="rot">Conferir — toque para corrigir</div>
+    <div id="conf"></div>
+    <div class="linha" style="margin-top:20px">
+      <button class="btn gho" id="bDescartar">Descartar</button>
+      <button class="btn" id="bSalvar">Salvar</button></div>
+  </div>
+</section>
+
+<!-- ══════════ MANUAL ══════════ -->
+<section id="v-man" class="view">
+  <h2>Correção manual</h2>
+  <p class="sub">Mesma base de dados da leitura automática.</p>
+  <div id="manPasso"></div>
+</section>
+
+<!-- ══════════ RESULTADOS ══════════ -->
+<section id="v-res" class="view">
+  <h2>Resultados</h2>
+  <p class="sub" id="resSub"></p>
+  <div id="resLista"></div>
+  <div class="linha" style="margin-top:18px" id="resAcoes" hidden>
+    <button class="btn sec" id="bCsv">Baixar CSV</button>
+    <button class="btn gho" id="bZerar">Apagar notas</button></div>
+</section>
+
+<!-- ══════════ DESEMPENHO ══════════ -->
+<section id="v-des" class="view">
+  <h2>Análise da turma</h2>
+  <p class="sub" id="desSub"></p>
+  <div id="desCorpo"></div>
+</section>
+
+</div>
+<nav>
+  <button data-v="casa" class="on"><svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/></svg>Turmas</button>
+  <button data-v="ler"><svg viewBox="0 0 24 24"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M7 12h10"/></svg>Ler</button>
+  <button data-v="man"><svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Manual</button>
+  <button data-v="res"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Notas<span class="pill" id="pill" hidden>0</span></button>
+  <button data-v="des"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Análise</button>
+</nav></div>
+
+<script src="jsqr.js"></script>
+<script>if(typeof jsQR!=="function"){document.write('<scr'+'ipt src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></scr'+'ipt>');}</script>
+<script src="embaralho.js"></script>
+<script src="layout.js"></script>
+<script src="jspdf.umd.min.js"></script>
+<script src="qrcode.min.js"></script>
+<script src="fonte.js"></script>
+<script src="gerador.js"></script>
+<script>
+"use strict";
+/* ═══════════════════════════════════════════════════════════════════
+   1. LAYOUT ATIVO — agora é variável: cada prova traz o seu.
+      Preenchido por aplicarLayout(); o núcleo de visão abaixo só lê.
+   ═══════════════════════════════════════════════════════════════════ */
+let LAY = layoutNormalizado(10, 5);      // padrão até haver prova ativa
+let NQ = 10, NO = 5;
+let IDX = [0,1,2,3,4];
+
+function aplicarLayout(nq, no){
+  if(LAY && LAY.n_questions === nq && LAY.n_options === no) return false;
+  LAY = layoutNormalizado(nq, no);
+  NQ = nq; NO = no;
+  IDX = Array.from({length:no}, (_,i)=>i);
+  const g = document.getElementById("grade");
+  if(g){ g.dataset.pronto = ""; g.innerHTML = "";
+    g.style.gridTemplateColumns = "auto repeat(" + no + ",14px)"; }
+  return true;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   2. VISÃO COMPUTACIONAL — idêntica à versão validada em sala.
+   ═══════════════════════════════════════════════════════════════════ */
+function cinza(img){                       // ImageData -> {g,w,h}
+  const {data,width:w,height:h}=img, g=new Uint8ClampedArray(w*h);
+  for(let i=0,p=0;i<g.length;i++,p+=4)
+    g[i]=(data[p]*77+data[p+1]*151+data[p+2]*28)>>8;
+  return {g,w,h};
+}
+function reduzir(s,alvo){                  // subamostragem por caixa
+  if(s.w<=alvo) return s;
+  const e=Math.ceil(s.w/alvo), w=(s.w/e)|0, h=(s.h/e)|0, g=new Uint8ClampedArray(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    let t=0; const y0=y*e,x0=x*e;
+    for(let j=0;j<e;j++){const r=(y0+j)*s.w; for(let i=0;i<e;i++) t+=s.g[r+x0+i];}
+    g[y*w+x]=t/(e*e);
+  }
+  return {g,w,h,esc:e};
+}
+function planificar(s){                    // corrige gradiente de luz
+  const {g,w,h}=s, I=new Float64Array((w+1)*(h+1));
+  for(let y=0;y<h;y++){let lin=0;
+    for(let x=0;x<w;x++){lin+=g[y*w+x]; I[(y+1)*(w+1)+x+1]=I[y*(w+1)+x+1]+lin;}}
+  const r=Math.max(2,Math.round(w*0.055)), o=new Uint8ClampedArray(w*h);
+  for(let y=0;y<h;y++){
+    const y0=Math.max(0,y-r), y1=Math.min(h,y+r+1);
+    for(let x=0;x<w;x++){
+      const x0=Math.max(0,x-r), x1=Math.min(w,x+r+1);
+      const som=I[y1*(w+1)+x1]-I[y0*(w+1)+x1]-I[y1*(w+1)+x0]+I[y0*(w+1)+x0];
+      const bg=som/((y1-y0)*(x1-x0))+1;
+      o[y*w+x]=Math.min(255,g[y*w+x]/bg*200);
+    }}
+  return {g:o,w,h};
+}
+function otsu(g){
+  const H=new Float64Array(256); for(let i=0;i<g.length;i++)H[g[i]]++;
+  let sm=0; for(let t=0;t<256;t++) sm+=t*H[t];
+  let wB=0,sB=0,best=-1,th=128;
+  for(let t=0;t<256;t++){ wB+=H[t]; if(!wB)continue;
+    const wF=g.length-wB; if(wF<=0)break; sB+=t*H[t];
+    const v=wF*wB*Math.pow(sB/wB-(sm-sB)/wF,2); if(v>best){best=v;th=t;} }
+  return th;
+}
+/* blobs escuros que são quadrados sólidos, com testes invariantes à rotação */
+function fiduciais(s){
+  const F=planificar(s), th=otsu(F.g)*0.92, {w,h}=F, N=w*h;
+  const vis=new Uint8Array(N), pil=new Int32Array(N), cands=[];
+  for(let p=0;p<N;p++){
+    if(vis[p]||F.g[p]>=th) continue;
+    let top=0; pil[top++]=p; vis[p]=1;
+    let n=0,sx=0,sy=0,sxx=0,sxy=0,syy=0;
+    while(top){
+      const q=pil[--top], x=q%w, y=(q/w)|0;
+      n++; sx+=x; sy+=y; sxx+=x*x; sxy+=x*y; syy+=y*y;
+      if(x>0   && !vis[q-1] && F.g[q-1]<th){vis[q-1]=1;pil[top++]=q-1;}
+      if(x<w-1 && !vis[q+1] && F.g[q+1]<th){vis[q+1]=1;pil[top++]=q+1;}
+      if(y>0   && !vis[q-w] && F.g[q-w]<th){vis[q-w]=1;pil[top++]=q-w;}
+      if(y<h-1 && !vis[q+w] && F.g[q+w]<th){vis[q+w]=1;pil[top++]=q+w;}
+    }
+    if(n<N*5e-4 || n>N*0.05) continue;   // 5e-4: acha o cartão mesmo com muita margem branca em volta
+    const mx=sx/n, my=sy/n;
+    const u20=sxx/n-mx*mx, u02=syy/n-my*my, u11=sxy/n-mx*my;
+    const tr=u20+u02, di=Math.hypot(u20-u02,2*u11);
+    const l1=(tr+di)/2, l2=(tr-di)/2;
+    if(l2<=1e-6) continue;
+    if(!(Math.sqrt(l1/l2)>0.72 && Math.sqrt(l1/l2)<1.38)) continue;   // isotrópico
+    const cheio=n/(12*Math.sqrt(l1*l2));                              // sólido ≈ 1
+    if(!(cheio>0.84 && cheio<1.22)) continue;
+    cands.push({x:mx,y:my,a:n});
+  }
+  if(cands.length<4) return null;
+  const amax=Math.max(...cands.map(c=>c.a));
+  let C=cands.filter(c=>c.a>=0.40*amax).sort((x,y)=>y.a-x.a).slice(0,8)
+             .map(c=>[c.x,c.y]);
+  if(C.length<4) return null;
+  if(C.length>4) C=melhorQuatro(C);
+  const q=orientar(C,F,th);
+  if(!q) return null;
+  const k=s.esc||1;
+  return q.map(p=>[p[0]*k,p[1]*k]);
+}
+const areaPoli=P=>{ let A=0;
+  for(let i=0;i<P.length;i++){const j=(i+1)%P.length; A+=P[i][0]*P[j][1]-P[j][0]*P[i][1];}
+  return Math.abs(A/2); };
+function ciclico(P){                      // ordem cíclica em volta do centroide
+  const cx=P.reduce((s,p)=>s+p[0],0)/P.length, cy=P.reduce((s,p)=>s+p[1],0)/P.length;
+  return P.slice().sort((a,b)=>Math.atan2(a[1]-cy,a[0]-cx)-Math.atan2(b[1]-cy,b[0]-cx));
+}
+function melhorQuatro(P){                 // os 4 que formam o maior quadrilátero
+  let best=null,ba=-1;
+  for(let a=0;a<P.length-3;a++) for(let b=a+1;b<P.length-2;b++)
+    for(let c=b+1;c<P.length-1;c++) for(let d=c+1;d<P.length;d++){
+      const q=ciclico([P[a],P[b],P[c],P[d]]), ar=areaPoli(q);
+      if(ar>ba){ba=ar;best=q;}
+    }
+  return best;
+}
+function convexo(q){
+  let sg=0;
+  for(let i=0;i<4;i++){
+    const a=q[i],b=q[(i+1)%4],c=q[(i+2)%4];
+    const z=(b[0]-a[0])*(c[1]-b[1])-(b[1]-a[1])*(c[0]-b[0]);
+    if(z===0) continue; const g=Math.sign(z);
+    if(sg && g!==sg) return false; sg=g;
+  }
+  return true;
+}
+/* fração de pixels escuros na janela do QR, medida na imagem planificada:
+   ~0,45 na orientação correta e ~0,05 nas outras sete */
+function massaQR(F,th,q){
+  const W=600, H=W/LAY.aspect, Hm=homografia(q,W,H); if(!Hm) return 0;
+  const {g,w,h}=F; let esc=0,n=0;
+  for(let i=0;i<20;i++) for(let j=0;j<20;j++){
+    const u=(LAY.qr.x0+(LAY.qr.x1-LAY.qr.x0)*(i+0.5)/20)*W;
+    const v=(LAY.qr.y0+(LAY.qr.y1-LAY.qr.y0)*(j+0.5)/20)*H;
+    const p=proj(Hm,u,v), xi=Math.round(p[0]), yi=Math.round(p[1]); n++;
+    if(xi>=0&&yi>=0&&xi<w&&yi<h&&g[yi*w+xi]<th) esc++;
+  }
+  return esc/n;
+}
+/* testa as 8 orientações possíveis: filtra pela proporção, desempata pelo QR.
+   Não usa extremos — por isso tolera rotação forte sem inverter o cartão. */
+function orientar(P,F,th){
+  const ciclo=ciclico(P), dirs=[ciclo,ciclo.slice().reverse()];
+  let melhor=null, best=1e9;
+  for(const dir of dirs) for(let r=0;r<4;r++){
+    const q=[0,1,2,3].map(i=>dir[(i+r)%4]);
+    const d=(a,b)=>Math.hypot(q[a][0]-q[b][0],q[a][1]-q[b][1]);
+    const lg=(d(0,1)+d(3,2))/2, at=(d(0,3)+d(1,2))/2;
+    if(at<1e-6) continue;
+    const razao=(lg/at)/LAY.aspect;
+    if(!(razao>0.55 && razao<1.80)) continue;
+    if(!convexo(q)) continue;
+    const fr=massaQR(F,th,q);
+    if(fr<0.22) continue;
+    const custo=-fr*100+Math.abs(Math.log(razao))*40;
+    if(custo<best){ best=custo; melhor=q; }
+  }
+  if(!melhor) return null;
+  return areaPoli(melhor)>F.w*F.h*0.02 ? melhor : null;
+}
+/* homografia: retângulo (0,0)-(W,H) -> quadrilátero da foto */
+function homografia(q,W,H){
+  const s=[[0,0],[W,0],[W,H],[0,H]], A=[], b=[];
+  for(let i=0;i<4;i++){
+    const [u,v]=s[i], [x,y]=q[i];
+    A.push([u,v,1,0,0,0,-u*x,-v*x]); b.push(x);
+    A.push([0,0,0,u,v,1,-u*y,-v*y]); b.push(y);
+  }
+  for(let c=0;c<8;c++){                                 // eliminação de Gauss
+    let p=c; for(let r=c+1;r<8;r++) if(Math.abs(A[r][c])>Math.abs(A[p][c])) p=r;
+    [A[c],A[p]]=[A[p],A[c]]; [b[c],b[p]]=[b[p],b[c]];
+    if(Math.abs(A[c][c])<1e-12) return null;
+    for(let r=0;r<8;r++){ if(r===c) continue;
+      const f=A[r][c]/A[c][c];
+      for(let k=c;k<8;k++) A[r][k]-=f*A[c][k];
+      b[r]-=f*b[c];
+    }
+  }
+  const h=b.map((v,i)=>v/A[i][i]);
+  return [h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],1];
+}
+const proj=(H,u,v)=>{ const d=H[6]*u+H[7]*v+1;
+  return [(H[0]*u+H[1]*v+H[2])/d,(H[3]*u+H[4]*v+H[5])/d]; };
+
+let DISCO=null, ANEL=null, RB=0;
+function amostras(rb){
+  if(RB===rb) return; RB=rb;
+  const ri=rb*0.60; DISCO=[];
+  for(let dy=-ri;dy<=ri;dy+=1.3) for(let dx=-ri;dx<=ri;dx+=1.3)
+    if(dx*dx+dy*dy<=ri*ri) DISCO.push([dx,dy]);
+  ANEL=[];
+  for(let i=0;i<32;i++){ const a=i/32*6.2832;
+    ANEL.push([Math.cos(a)*rb*1.30,Math.sin(a)*rb*1.30]);
+    ANEL.push([Math.cos(a)*rb*1.62,Math.sin(a)*rb*1.62]); }
+}
+function lerBolhas(src,quad){
+  const W=1000, H=W/LAY.aspect, Hm=homografia(quad,W,H);
+  if(!Hm) return null;
+  amostras(LAY.bubble_r*W);
+  const {g,w,h}=src;
+  const px=(x,y)=>{ const xi=Math.round(x),yi=Math.round(y);
+    return (xi<0||yi<0||xi>=w||yi>=h)?255:g[yi*w+xi]; };
+  const R=[], mark=[];
+  for(let q=1;q<=NQ;q++){
+    const fi=LAY.bubbles[q].map(([nx,ny])=>{
+      const u=nx*W, v=ny*H, an=[];
+      for(const [dx,dy] of ANEL){const p=proj(Hm,u+dx,v+dy); an.push(px(p[0],p[1]));}
+      an.sort((a,b)=>a-b);
+      const branco=an[an.length>>1], lim=Math.max(40,branco*0.66);
+      let d=0; for(const [dx,dy] of DISCO){const p=proj(Hm,u+dx,v+dy); if(px(p[0],p[1])<lim)d++;}
+      return d/DISCO.length;
+    });
+    const or=IDX.slice().sort((a,b)=>fi[b]-fi[a]);
+    const b1=fi[or[0]], b2=fi[or[1]];
+    if(b1<0.38){ R.push(null); mark.push("BRANCO"); }
+    else if(b2>0.55*b1 && b2>0.34){ R.push(null); mark.push("DUPLA"); }
+    else { R.push(LAY.options[or[0]]); mark.push("OK"); }
+  }
+  return {R,mark};
+}
+function lerQR(src,quad){
+  if(typeof jsQR!=="function") return null;
+  const W=1500, H=W/LAY.aspect, Hm=homografia(quad,W,H); if(!Hm) return null;
+  const pad=0.02, L=560;
+  const u0=(LAY.qr.x0-pad)*W, v0=(LAY.qr.y0-pad)*H;
+  const u1=(LAY.qr.x1+pad)*W, v1=(LAY.qr.y1+pad)*H;
+  const {g,w,h}=src, gr=new Uint8ClampedArray(L*L);
+  /* amostragem bilinear: com o cartão girado ou pequeno na foto, o vizinho
+     mais próximo serrilha as bordas dos módulos e o QR deixa de decodificar */
+  const bilinear=(x,y)=>{
+    if(x<0||y<0||x>w-1||y>h-1) return 255;
+    const x0=x|0, y0=y|0, x1=x0+1<w?x0+1:x0, y1=y0+1<h?y0+1:y0;
+    const fx=x-x0, fy=y-y0;
+    const a=g[y0*w+x0], b=g[y0*w+x1], c=g[y1*w+x0], d=g[y1*w+x1];
+    return (a*(1-fx)+b*fx)*(1-fy)+(c*(1-fx)+d*fx)*fy;
+  };
+  for(let j=0;j<L;j++){
+    const v=v0+(v1-v0)*j/(L-1);
+    for(let i=0;i<L;i++){
+      const p=proj(Hm,u0+(u1-u0)*i/(L-1),v);
+      gr[j*L+i]=bilinear(p[0],p[1]);
+    }}
+  let mn=255,mx=0;                                   // realce de contraste
+  for(const t of gr){ if(t<mn)mn=t; if(t>mx)mx=t; }
+  const dv=Math.max(1,mx-mn);
+  const out=new Uint8ClampedArray(L*L*4);
+  for(let i=0;i<L*L;i++){
+    const t=Math.max(0,Math.min(255,(gr[i]-mn)*255/dv)), o=i*4;
+    out[o]=out[o+1]=out[o+2]=t; out[o+3]=255;
+  }
+  try{ const r=jsQR(out,L,L,{inversionAttempts:"dontInvert"}); return r?r.data:null; }
+  catch(e){ return null; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   3. ESTADO — escolas › turmas › provas › resultados
+   ═══════════════════════════════════════════════════════════════════ */
+const guarda=(()=>{ let mem={},ok=false;
+  try{localStorage.setItem("_t","1");localStorage.removeItem("_t");ok=true;}catch(e){}
+  return {ler:k=>{try{return ok?localStorage.getItem(k):mem[k];}catch(e){return mem[k];}},
+          esc:(k,v)=>{try{ok?localStorage.setItem(k,v):(mem[k]=v);}catch(e){mem[k]=v;}}};})();
+
+const $=s=>document.querySelector(s);
+const esc=t=>String(t==null?"":t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const primeiroNome=n=>String(n).split(" ").slice(0,2).join(" ");
+const uid=p=>p+"-"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const ordNum=(a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true});
+
+/* ── semente: as onze turmas das duas escolas ───────────────────── */
+function semear(){
+  const T=(escola,nome,serie,disciplina)=>({id:"t-"+nome,escola,nome,serie,disciplina,alunos:[]});
+  return {
+    v:4,
+    escolas:[
+      {id:"jc",nome:"EREM Senador João Cleofas de Oliveira",curto:"João Cleofas"},
+      {id:"ra",nome:"E.M. Doutor Rodolfo Aureliano",curto:"Rodolfo Aureliano"}],
+    turmas:[
+      T("jc","3A","3º ano","Matemática"),
+      T("jc","3B","3º ano","Matemática"),
+      T("jc","3C","3º ano","Matemática Básica"),
+      T("jc","3D","3º ano","Matemática Básica"),
+      T("jc","M3A","EJA Módulo 3","Matemática"),
+      T("jc","M3B","EJA Módulo 3","Matemática"),
+      T("ra","8A","8º ano","Matemática"),
+      T("ra","8B","8º ano","Matemática"),
+      T("ra","8C","8º ano","Matemática"),
+      T("ra","8D","8º ano","Matemática"),
+      T("ra","9E","9º ano","Matemática")],
+    provas:[], ativa:null, res:[]
+  };
+}
+
+/* ── carga, com resgate do que existia na versão anterior ───────── */
+let E=(()=>{
+  const novo=guarda.ler("dbm_omr_v4");
+  if(novo){ try{ const d=JSON.parse(novo);
+    if(d&&d.v===4) return d; }catch(e){} }
+  const base=semear();
+  try{
+    const velho=JSON.parse(guarda.ler("dbm_omr_v3")||"null");
+    if(velho&&velho.gabC&&velho.gabC.length>=5){
+      // reconstrói a prova antiga e devolve os alunos às turmas
+      Object.entries(velho.turmas||{}).forEach(([nm,mapa])=>{
+        let t=base.turmas.find(x=>x.nome===nm);
+        if(!t){ t={id:"t-"+nm,escola:"jc",nome:nm,serie:"—",disciplina:"Matemática",alunos:[]};
+          base.turmas.push(t); }
+        Object.entries(mapa).forEach(([num,nome])=>{
+          if(!t.alunos.some(a=>a.numero===num)) t.alunos.push({numero:num,nome}); });
+        t.alunos.sort((a,b)=>ordNum(a.numero,b.numero));
+      });
+      const alvo=base.turmas.filter(t=>(velho.turmas||{})[t.nome]);
+      alvo.forEach(t=>{
+        const p={id:uid("p"),turma:t.id,codigo:velho.id||"PROVA",
+          titulo:"Prova importada da versão anterior",
+          nq:velho.gabC.length,no:5,gabC:velho.gabC,
+          habs:(velho.habs||[]).slice(),criada:Date.now()};
+        base.provas.push(p);
+        (velho.alunos||[]).filter(a=>a.turma===t.nome).forEach(a=>{
+          base.res.push(Object.assign({},a,{prova:p.id,turma:t.id})); });
+      });
+      if(base.provas.length) base.ativa=base.provas[0].id;
+    }
+  }catch(e){ console.warn("nada a migrar",e); }
+  return base;
+})();
+const salvar=()=>guarda.esc("dbm_omr_v4",JSON.stringify(E));
+
+/* ── acessos ────────────────────────────────────────────────────── */
+const provaDe=id=>E.provas.find(p=>p.id===id)||null;
+const turmaDe=id=>E.turmas.find(t=>t.id===id)||null;
+const escolaDe=id=>E.escolas.find(x=>x.id===id)||null;
+const provaAtiva=()=>provaDe(E.ativa);
+const turmaAtiva=()=>{const p=provaAtiva();return p?turmaDe(p.turma):null;};
+const provasDaTurma=id=>E.provas.filter(p=>p.turma===id).sort((a,b)=>b.criada-a.criada);
+const resDa=pid=>E.res.filter(r=>r.prova===pid);
+const chave=r=>r.prova+"|"+r.turma+"#"+r.numero;
+
+function ativar(pid){
+  const p=provaDe(pid); if(!p) return;
+  E.ativa=pid; aplicarLayout(p.nq,p.no); salvar(); refletirBarra();
+  manAluno=null; pintarResultados(); pintarDesempenho(); montarManual();
+}
+function refletirBarra(){
+  const p=provaAtiva(), t=turmaAtiva(), b=$("#barra");
+  if(!p||!t){ b.classList.add("off");
+    $("#bCtx1").textContent="Nenhuma prova selecionada";
+    $("#bCtx2").textContent="Comece pela aba Turmas"; return; }
+  b.classList.remove("off");
+  $("#bCtx1").textContent=(p.titulo||p.codigo)+" · "+t.nome;
+  const e=escolaDe(t.escola);
+  $("#bCtx2").textContent=[p.codigo,p.nq+" questões",
+    "A–"+LETRAS_ATE(p.no),e?e.curto:""].filter(Boolean).join(" · ");
+}
+const LETRAS_ATE=n=>["A","B","C","D","E"][n-1];
+
+/* ── gabarito individual, a partir do canônico + turma/número ───── */
+function gabaritoDe(nomeTurma,numero){
+  const p=provaAtiva(); if(!p||!p.gabC) return null;
+  const {oq,oa}=embaralharProva(p.nq,p.no,nomeTurma,numero);
+  let g="";
+  for(let i=0;i<p.nq;i++){
+    const certa=LAY.options.indexOf(p.gabC[oq[i]]);
+    g+=LAY.options[oa[i].indexOf(certa)];
+  }
+  return g;
+}
+function canonizar(R,nomeTurma,numero){
+  const p=provaAtiva(); if(!p) return R.slice();
+  const {oq,oa}=embaralharProva(p.nq,p.no,nomeTurma,numero);
+  const out=new Array(p.nq).fill(null);
+  for(let i=0;i<p.nq;i++){
+    if(!R[i]) continue;
+    const k=LAY.options.indexOf(R[i]);
+    if(k>=0) out[oq[i]]=LAY.options[oa[i][k]];
+  }
+  return out;
+}
+
+/* ═════════ 4. REGISTRO ═════════ */
+function registrar(d){
+  const p=provaAtiva(); if(!p) return null;
+  const t=turmaDe(p.turma);
+  const gab=d.gab||gabaritoDe(t.nome,d.numero);
+  if(!gab) return null;
+  let acertos=0; const certas=[],erradas=[];
+  for(let i=0;i<p.nq;i++){
+    if(d.R[i]&&d.R[i]===gab[i]){acertos++;certas.push(i+1);} else erradas.push(i+1);
+  }
+  const reg={prova:p.id,turma:p.turma,numero:d.numero||"",nome:d.nome,
+    R:d.R.slice(),Rc:canonizar(d.R,t.nome,d.numero),gab,
+    nota:acertos,acertos,erros:p.nq-acertos,certas,erradas,
+    origem:d.origem,t:Date.now()};
+  const k=chave(reg), i=E.res.findIndex(x=>chave(x)===k);
+  if(i>=0) E.res[i]=reg; else E.res.push(reg);
+  salvar(); pintarResultados(); pintarDesempenho();
+  return reg;
+}
+const pct=(a,b)=>b?Math.round(100*a/b):0;
+
+/* ═══════════════════════════════════════════════════════════════════
+   5. TELA TURMAS / PROVAS
+   ═══════════════════════════════════════════════════════════════════ */
+let casaNivel="turmas", casaTurma=null, casaForm=null;
+
+function montarCasa(){
+  const box=$("#casaCorpo");
+  if(casaNivel==="turmas")   return telaTurmas(box);
+  if(casaNivel==="provas")   return telaProvas(box);
+  if(casaNivel==="alunos")   return telaAlunos(box);
+  if(casaNivel==="nova")     return telaNovaProva(box);
+  if(casaNivel==="prova")    return telaProva(box);
+  if(casaNivel==="questoes") return telaQuestoes(box);
+}
+
+/* ── ficha da prova: corrigir, editar questões, gerar PDF ────────── */
+let casaProva=null;
+
+function telaProva(box){
+  const p=provaDe(casaProva), t=turmaDe(p.turma);
+  const nq=(p.questoes||[]).length, corrigidos=resDa(p.id).length;
+  box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(t.nome)}</button></div>
+    <h2>${esc(p.titulo||p.codigo)}</h2>
+    <p class="sub">${esc(p.codigo)} · ${p.nq} questões · A–${LETRAS_ATE(p.no)} · turma ${esc(t.nome)}</p>
+    <div class="chip">gabarito <b>${esc(p.gabC)}</b></div>
+    <div class="chip">questões digitadas <b>${nq}/${p.nq}</b></div>
+    <div class="chip">corrigidos <b>${corrigidos}</b></div>
+    <div class="rot">O que você quer fazer</div>
+    <button class="item" id="aCorrigir"><div class="cor"><div class="t1">Corrigir cartões</div>
+      <div class="t2">Abre a câmera com esta prova ativa</div></div><span class="ch">›</span></button>
+    <button class="item" id="aQuestoes"><div class="cor"><div class="t1">Questões da prova</div>
+      <div class="t2">${nq?nq+" questões digitadas":"Nenhuma questão digitada ainda"}</div></div><span class="ch">›</span></button>
+    <button class="item" id="aPdf"><div class="cor"><div class="t1">Gerar provas em PDF</div>
+      <div class="t2">${t.alunos.length?t.alunos.length+" provas personalizadas":"Cadastre os estudantes primeiro"}</div>
+      </div><span class="ch">›</span></button>
+    <button class="item" id="aCartoes"><div class="cor"><div class="t1">Gerar só os cartões-resposta</div>
+      <div class="t2">Para quem imprime a prova separadamente</div></div><span class="ch">›</span></button>
+    <div id="pdfStatus"></div>
+    <button class="btn gho" id="aExcluir" style="margin-top:18px">Excluir esta prova</button>`;
+  $("#mVolta").onclick=()=>{casaNivel="provas";montarCasa();};
+  $("#aCorrigir").onclick=()=>{ativar(p.id);irPara("ler");};
+  $("#aQuestoes").onclick=()=>{casaNivel="questoes";montarCasa();};
+  $("#aPdf").onclick=()=>gerarPDF(p,t,"prova");
+  $("#aCartoes").onclick=()=>gerarPDF(p,t,"cartoes");
+  $("#aExcluir").onclick=()=>{
+    const n=resDa(p.id).length;
+    if(!confirm("Excluir a prova "+p.codigo+(n?" e seus "+n+" resultados":"")+"?")) return;
+    E.provas=E.provas.filter(x=>x.id!==p.id);
+    E.res=E.res.filter(r=>r.prova!==p.id);
+    if(E.ativa===p.id) E.ativa=(E.provas[0]||{}).id||null;
+    salvar(); refletirBarra(); casaNivel="provas"; montarCasa();
+    pintarResultados(); pintarDesempenho(); montarManual(); };
+}
+
+/* ── questões: aceita o formato que o professor já digita ────────── */
+function lerQuestoes(txt){
+  const questoes=[]; let gab="", atual=null, ultimaAlt=null, alvo=null;
+  String(txt).split(/\r?\n/).forEach(linha=>{
+    const l=linha.trim();
+    if(!l){ alvo=null; return; }
+    const mq=/^(\d{1,2})\s*[.)\-–]\s*(.*)$/.exec(l);
+    const ma=/^(\*?)\s*([A-Ea-e])\s*[).\-–]\s+(.*)$/.exec(l);
+    if(ma && atual){
+      const k=ma[2].toUpperCase().charCodeAt(0)-65;
+      while(atual.alternativas.length<k) atual.alternativas.push("");
+      atual.alternativas[k]=ma[3].trim();
+      if(ma[1]==="*") atual.correta=k;
+      ultimaAlt=k; alvo="alt"; return;
+    }
+    if(mq && (!atual || atual.alternativas.length)){
+      atual={enunciado:mq[2].trim(),alternativas:[],correta:null};
+      questoes.push(atual); ultimaAlt=null; alvo="enun"; return;
+    }
+    if(atual && alvo==="alt" && ultimaAlt!==null){
+      atual.alternativas[ultimaAlt]+=" "+l; return; }
+    if(atual && alvo==="enun"){ atual.enunciado+=" "+l; return; }
+    if(!atual){ atual={enunciado:l,alternativas:[],correta:null};
+      questoes.push(atual); alvo="enun"; }
+  });
+  questoes.forEach(q=>{ gab += (q.correta==null?"?":"ABCDE"[q.correta]); });
+  return {questoes,gabarito:gab};
+}
+function questoesParaTexto(qs){
+  return (qs||[]).map((q,i)=>{
+    const alt=(q.alternativas||[]).map((a,k)=>
+      ((q.correta===k)?"*":"")+"ABCDE"[k]+") "+a).join("\n");
+    return (i+1)+". "+q.enunciado+(alt?"\n"+alt:"");
+  }).join("\n\n");
+}
+
+function telaQuestoes(box){
+  const p=provaDe(casaProva);
+  box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(p.codigo)}</button></div>
+    <h2>Questões da prova</h2>
+    <p class="sub">Digite ou cole no formato de sempre. Marque a correta com
+      <b>*</b> antes da letra e o gabarito se preenche sozinho.</p>
+    <textarea id="txQ" spellcheck="false" style="min-height:300px"
+      placeholder="1. Dados os conjuntos A = {1,2,3,4} e B = {3,4,5}, determine A ∩ B.
+A) {1,2}
+*B) {3,4}
+C) {5}
+D) {1,2,3,4,5}
+E) conjunto vazio
+
+2. Um prisma reto tem base quadrada de lado 5 cm e altura 12 cm..."></textarea>
+    <div id="qAviso"></div>
+    <div class="duo" style="margin-top:11px">
+      <button class="btn sec" id="bConferir">Conferir</button>
+      <button class="btn" id="bSalvaQ">Salvar questões</button></div>
+    <p class="hint">Linhas soltas continuam o enunciado ou a alternativa anterior,
+      então pode colar texto quebrado que o app remonta.</p>`;
+  $("#txQ").value=questoesParaTexto(p.questoes);
+  const conferir=()=>{
+    const {questoes,gabarito}=lerQuestoes($("#txQ").value);
+    const av=[];
+    if(questoes.length!==p.nq)
+      av.push(`Encontrei <b>${questoes.length}</b> questões, mas a prova foi criada com <b>${p.nq}</b>.`);
+    const curtas=questoes.map((q,i)=>q.alternativas.filter(a=>a&&a.trim()).length<p.no?i+1:0).filter(Boolean);
+    if(curtas.length) av.push(`Questão ${curtas.join(", ")}: menos de ${p.no} alternativas.`);
+    const vazias=questoes.map((q,i)=>!q.enunciado?i+1:0).filter(Boolean);
+    if(vazias.length) av.push(`Questão ${vazias.join(", ")}: enunciado vazio.`);
+    if(typeof caracteresFaltando==="function"){
+      const t=[]; questoes.forEach(q=>{t.push(q.enunciado);q.alternativas.forEach(a=>t.push(a));});
+      const fora=caracteresFaltando(t);
+      if(fora.length) av.push(`Estes caracteres não existem na fonte e sumiriam da prova: <b>${esc(fora.join(" "))}</b>`);
+    }
+    const semMarca=gabarito.indexOf("?")>=0;
+    const divergiu=!semMarca && questoes.length===p.nq && gabarito!==p.gabC;
+    let h="";
+    if(av.length) h+=`<div class="aviso">${av.join("<br>")}</div>`;
+    if(divergiu)
+      h+=`<div class="aviso">Pelas marcações <b>*</b> o gabarito seria <b>${esc(gabarito)}</b>,
+          e o cadastrado é <b>${esc(p.gabC)}</b>. Salvar vai usar o das marcações.</div>`;
+    if(semMarca && !av.length)
+      h+=`<div class="aviso">Nenhuma alternativa marcada com <b>*</b>.
+          O gabarito cadastrado (<b>${esc(p.gabC)}</b>) será mantido.</div>`;
+    if(!av.length && !semMarca && !divergiu)
+      h+=`<div class="diag"><b>Tudo certo</b>${questoes.length} questões, gabarito ${esc(gabarito)}.</div>`;
+    $("#qAviso").innerHTML=h;
+    return {questoes,gabarito,semMarca};
+  };
+  $("#txQ").oninput=()=>{ $("#qAviso").innerHTML=""; };
+  $("#bConferir").onclick=conferir;
+  $("#mVolta").onclick=()=>{casaNivel="prova";montarCasa();};
+  $("#bSalvaQ").onclick=()=>{
+    const {questoes,gabarito,semMarca}=conferir();
+    if(!questoes.length){ alert("Não encontrei nenhuma questão no texto."); return; }
+    p.questoes=questoes.map(q=>({enunciado:q.enunciado,
+      alternativas:q.alternativas.slice(0,p.no),correta:q.correta}));
+    if(!semMarca && gabarito.length===p.nq) p.gabC=gabarito;
+    salvar(); casaNivel="prova"; montarCasa(); };
+}
+
+/* ── geração dos PDFs ────────────────────────────────────────────── */
+function gerarPDF(p,t,modo){
+  const st=$("#pdfStatus");
+  const dizer=(cls,txt)=>{ st.innerHTML=`<div class="${cls}" style="margin-top:12px">${txt}</div>`; };
+  if(!t.alunos.length){ dizer("aviso","Cadastre os estudantes da turma antes de gerar."); return; }
+  if(typeof window.jspdf==="undefined"||typeof qrcode!=="function"){
+    dizer("aviso","Faltou carregar jspdf.umd.min.js ou qrcode.min.js. Envie-os para o GitHub."); return; }
+  if(modo==="prova" && (p.questoes||[]).length!==p.nq){
+    dizer("aviso",`A prova tem ${p.nq} questões, mas só ${(p.questoes||[]).length} foram digitadas.
+      Use “Questões da prova”, ou gere só os cartões.`); return; }
+  dizer("diag","Montando "+t.alunos.length+" provas…");
+  setTimeout(()=>{
+    try{
+      const e=escolaDe(t.escola);
+      const cfg={codigo:p.codigo,titulo:p.titulo,escola:e?e.nome:"",turma:t.nome,
+        disciplina:t.disciplina,gabaritoCanonico:p.gabC,no:p.no,questoes:p.questoes||[]};
+      const doc = (modo==="cartoes")
+        ? gerarFolhasDeCartoes(cfg,t.alunos)
+        : gerarProvas(cfg,t.alunos,window.jspdf.jsPDF);
+      const nome=(modo==="cartoes"?"cartoes_":"provas_")+t.nome+"_"+p.codigo+".pdf";
+      doc.save(nome);
+      let extra="";
+      if(doc.avisoCaracteres&&doc.avisoCaracteres.length)
+        extra=`<br><b>Atenção:</b> os caracteres ${esc(doc.avisoCaracteres.join(" "))} não existem na fonte e não foram impressos.`;
+      dizer("diag","<b>Pronto</b>"+doc.getNumberOfPages()+" páginas · "+nome+extra);
+    }catch(err){ console.error(err); dizer("aviso","Falhou ao gerar: "+err.message); }
+  },50);
+}
+
+/* várias etiquetas por folha, para quem imprime a prova à parte */
+function gerarFolhasDeCartoes(cfg,alunos){
+  const doc=new window.jspdf.jsPDF({unit:"mm",format:"a4",compress:true});
+  prepararFontes(doc);
+  const L=montarLayout(String(cfg.gabaritoCanonico).length,cfg.no);
+  const alt=L.box_h+2*L.quiet_zone, margem=14, passo=alt+6;
+  const porFolha=Math.max(1,Math.floor((297-2*margem)/passo));
+  const aviso=(pg)=>{
+    doc.setFont("helvetica","normal"); doc.setFontSize(6.5); doc.setTextColor(150,156,166);
+    doc.text("Recorte na linha tracejada antes de distribuir — a câmera não lê "+
+             "dois cartões na mesma folha.", 12, 8);
+  };
+  aviso();
+  alunos.forEach((a,i)=>{
+    if(i && i%porFolha===0){ doc.addPage(); aviso(); }
+    const linha=i%porFolha;
+    desenharCartao(doc,{x:margem,y:margem+linha*passo,codigo:cfg.codigo,
+      gabaritoCanonico:cfg.gabaritoCanonico,no:cfg.no,turma:cfg.turma,
+      numero:a.numero,nome:a.nome});
+    doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(120,128,140);
+    doc.text(a.numero+" · "+a.nome, margem, margem+linha*passo+alt+1.5);
+  });
+  return doc;
+}
+
+function telaTurmas(box){
+  let h='<h2>Minhas turmas</h2><p class="sub">Escolha a turma para criar ou abrir uma prova.</p>';
+  E.escolas.forEach(e=>{
+    const ts=E.turmas.filter(t=>t.escola===e.id);
+    if(!ts.length) return;
+    h+=`<div class="grupo"><div class="esc"><span class="nm">${esc(e.curto)}</span><span class="ln"></span></div>`;
+    h+=ts.map(t=>{
+      const np=provasDaTurma(t.id).length;
+      return `<button class="item" data-t="${t.id}"><div class="cor">
+        <div class="t1">${esc(t.nome)} · ${esc(t.disciplina)}</div>
+        <div class="t2">${esc(t.serie)} · ${t.alunos.length} estudante${t.alunos.length===1?"":"s"} · ${np} prova${np===1?"":"s"}</div>
+        </div><span class="ch">›</span></button>`;}).join("");
+    h+="</div>";
+  });
+  box.innerHTML=h;
+  box.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>{
+    casaTurma=b.dataset.t; casaNivel="provas"; montarCasa(); });
+}
+
+function telaProvas(box){
+  const t=turmaDe(casaTurma), e=escolaDe(t.escola), ps=provasDaTurma(t.id);
+  let h=`<div class="migalha"><button id="mVolta">‹ Turmas</button><span>·</span><span>${esc(e.curto)}</span></div>
+    <h2>${esc(t.nome)} · ${esc(t.disciplina)}</h2>
+    <p class="sub">${esc(t.serie)} · ${t.alunos.length} estudante${t.alunos.length===1?"":"s"} cadastrado${t.alunos.length===1?"":"s"}</p>
+    <button class="item" id="bAlunos"><div class="cor"><div class="t1">Estudantes da turma</div>
+      <div class="t2">${t.alunos.length?"Ver, editar ou substituir a lista":"Nenhum estudante ainda — toque para cadastrar"}</div>
+      </div><span class="ch">›</span></button>
+    <div class="rot">Provas desta turma</div>`;
+  if(!ps.length){
+    h+='<div class="vazio" style="padding:28px 16px"><b>Nenhuma prova ainda</b>Crie a primeira abaixo.</div>';
+  }else{
+    h+=ps.map(p=>{
+      const n=resDa(p.id).length, tot=t.alunos.length;
+      const tag=!n?'<span class="tag">0 corrigidos</span>'
+        :(tot&&n>=tot?`<span class="tag ok">${n} de ${tot}</span>`
+                     :`<span class="tag par">${n}${tot?" de "+tot:" corrigidos"}</span>`);
+      return `<button class="item ${p.id===E.ativa?"sel":""}" data-p="${p.id}"><div class="cor">
+        <div class="t1">${esc(p.titulo||p.codigo)}</div>
+        <div class="t2">${esc(p.codigo)} · ${p.nq} questões · A–${LETRAS_ATE(p.no)}</div>
+        </div>${tag}<span class="ch">›</span></button>`;}).join("");
+  }
+  h+='<button class="btn" id="bNova" style="margin-top:14px">Nova prova</button>';
+  box.innerHTML=h;
+  $("#mVolta").onclick=()=>{casaNivel="turmas";montarCasa();};
+  $("#bAlunos").onclick=()=>{casaNivel="alunos";montarCasa();};
+  $("#bNova").onclick=()=>{casaForm=null;casaNivel="nova";montarCasa();};
+  box.querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{
+    casaProva=b.dataset.p; ativar(casaProva); casaNivel="prova"; montarCasa(); });
+}
+
+/* ── estudantes ─────────────────────────────────────────────────── */
+function telaAlunos(box){
+  const t=turmaDe(casaTurma);
+  box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(t.nome)}</button></div>
+    <h2>Estudantes · ${esc(t.nome)}</h2>
+    <p class="sub">Um por linha. Aceita <b>07 Maria Silva</b>, <b>07;Maria Silva</b> ou só o nome
+      (numera na ordem). Colar de novo substitui a lista inteira.</p>
+    <textarea id="txAlunos" spellcheck="false" placeholder="01 ANA BEATRIZ DOS SANTOS
+02 BRUNO CARVALHO LIMA
+03 CARLA MENDES DA SILVA"></textarea>
+    <div class="duo" style="margin-top:11px">
+      <button class="btn sec" id="bArqAl">Importar arquivo</button>
+      <button class="btn" id="bSalvaAl">Salvar lista</button></div>
+    <input type="file" id="arqAl" accept=".json,.csv,.txt" hidden>
+    <p class="hint">O arquivo pode ser o <b>.json</b> de uma prova antiga, um <b>.csv</b> ou um
+      <b>.txt</b> com um estudante por linha.</p>`;
+  $("#txAlunos").value=t.alunos.map(a=>a.numero+" "+a.nome).join("\n");
+  $("#mVolta").onclick=()=>{casaNivel="provas";montarCasa();};
+  $("#bArqAl").onclick=()=>$("#arqAl").click();
+  $("#arqAl").onchange=ev=>{
+    const f=ev.target.files[0]; if(!f) return;
+    const r=new FileReader();
+    r.onload=()=>{ $("#txAlunos").value=textoDeArquivo(r.result,f.name,t.nome); };
+    r.readAsText(f); ev.target.value="";
+  };
+  $("#bSalvaAl").onclick=()=>{
+    const lista=lerListaAlunos($("#txAlunos").value);
+    if(!lista.length){ alert("Não encontrei nenhum nome na lista."); return; }
+    t.alunos=lista; salvar(); alert(lista.length+" estudantes salvos na turma "+t.nome+".");
+    casaNivel="provas"; montarCasa(); montarManual(); pintarResultados(); pintarDesempenho();
+  };
+}
+function textoDeArquivo(txt,nome,nomeTurma){
+  if(/\.json$/i.test(nome)){
+    try{ const d=JSON.parse(txt);
+      let al=Array.isArray(d)?d:(d.alunos||[]);
+      const desta=al.filter(a=>String(a.turma||"").toUpperCase()===nomeTurma.toUpperCase());
+      if(desta.length) al=desta;
+      return al.map(a=>(a.numero||"")+" "+(a.nome||"")).join("\n");
+    }catch(e){ return txt; }
+  }
+  return txt;
+}
+function lerListaAlunos(txt){
+  const out=[]; let auto=0;
+  String(txt).split(/\r?\n/).forEach(l=>{
+    l=l.trim(); if(!l) return;
+    let num="",nome=l;
+    const m=/^(\d{1,3})\s*[;,\t.\-]?\s+(.+)$/.exec(l);
+    if(m){ num=m[1]; nome=m[2]; }
+    else { const c=l.split(/[;,\t]/); if(c.length>1&&/^\d{1,3}$/.test(c[0].trim())){
+      num=c[0].trim(); nome=c.slice(1).join(" "); } }
+    nome=nome.replace(/[;,\t]+/g," ").replace(/\s{2,}/g," ").trim();
+    if(!nome||/^\d+$/.test(nome)) return;
+    if(!num) num=String(++auto).padStart(2,"0"); else num=num.padStart(2,"0");
+    if(out.some(a=>a.numero===num)) num=String(out.length+1).padStart(2,"0");
+    out.push({numero:num,nome:nome.toUpperCase()});
+  });
+  return out.sort((a,b)=>ordNum(a.numero,b.numero));
+}
+
+/* ── nova prova ─────────────────────────────────────────────────── */
+function telaNovaProva(box){
+  const t=turmaDe(casaTurma);
+  const F=casaForm||(casaForm={codigo:"",titulo:"",nq:10,no:5,gab:"",habs:""});
+  box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(t.nome)}</button></div>
+    <h2>Nova prova</h2><p class="sub">Turma ${esc(t.nome)} · ${esc(t.disciplina)}</p>
+    <label>Código da prova</label>
+    <input id="fCod" class="mono" placeholder="3A-AV2" value="${esc(F.codigo)}">
+    <label>Título</label>
+    <input id="fTit" placeholder="Avaliação 2 — Geometria Espacial" value="${esc(F.titulo)}">
+    <div class="duo"><div><label>Nº de questões</label>
+      <input id="fNq" type="number" min="5" max="30" value="${F.nq}"></div>
+      <div><label>Alternativas</label>
+      <select id="fNo"><option value="4"${F.no===4?" selected":""}>4 (A–D)</option>
+        <option value="5"${F.no===5?" selected":""}>5 (A–E)</option></select></div></div>
+    <label>Gabarito canônico — <span id="fLbl">${F.nq}</span> letras</label>
+    <input id="fGab" class="mono" placeholder="BDDACDCCDC" value="${esc(F.gab)}">
+    <div id="fPrev" style="margin-top:9px"></div>
+    <label>Habilidades (opcional) — uma por linha, na ordem das questões</label>
+    <textarea id="fHab" spellcheck="false" style="min-height:96px"
+      placeholder="Conjuntos: operações
+Conjuntos: diagramas
+Volume do prisma">${esc(F.habs)}</textarea>
+    <button class="btn" id="fSalvar" style="margin-top:16px">Criar prova</button>
+    <p class="hint">O gabarito canônico é o da prova <b>na ordem original</b>. Como cada aluno
+      recebe as questões embaralhadas, o app calcula o gabarito individual sozinho, a partir
+      da turma e do número.</p>`;
+  const sinc=()=>{
+    F.codigo=$("#fCod").value.trim(); F.titulo=$("#fTit").value.trim();
+    F.nq=Math.max(5,Math.min(30,parseInt($("#fNq").value,10)||10));
+    F.no=parseInt($("#fNo").value,10);
+    const lim=LETRAS_ATE(F.no);
+    F.gab=$("#fGab").value.toUpperCase().replace(new RegExp("[^A-"+lim+"]","g"),"").slice(0,F.nq);
+    $("#fGab").value=F.gab; $("#fLbl").textContent=F.nq;
+    F.habs=$("#fHab").value;
+    $("#fPrev").innerHTML=F.gab.length
+      ? `<div id="gabGrade">`+F.gab.split("").map((c,i)=>
+          `<div class="gq"><div class="n">${String(i+1).padStart(2,"0")}</div><div class="a">${c}</div></div>`).join("")
+        +`</div><p class="hint">${F.gab.length} de ${F.nq} letras preenchidas.</p>`
+      : "";
+  };
+  ["fCod","fTit","fNq","fNo","fGab","fHab"].forEach(id=>{
+    const el=$("#"+id); el.oninput=sinc; el.onchange=sinc; });
+  sinc();
+  $("#mVolta").onclick=()=>{casaNivel="provas";montarCasa();};
+  $("#fSalvar").onclick=()=>{
+    sinc();
+    if(F.gab.length!==F.nq){ alert("O gabarito precisa ter exatamente "+F.nq+" letras. Faltam "+(F.nq-F.gab.length)+"."); return; }
+    if(!F.codigo){ alert("Dê um código à prova (ex.: 3A-AV2)."); return; }
+    const habs=F.habs.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const p={id:uid("p"),turma:t.id,codigo:F.codigo,titulo:F.titulo,
+      nq:F.nq,no:F.no,gabC:F.gab,habs,criada:Date.now()};
+    E.provas.push(p); casaForm=null; ativar(p.id);
+    casaProva=p.id; casaNivel="prova"; montarCasa();
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   6. CÂMERA
+   ═══════════════════════════════════════════════════════════════════ */
+const video=$("#video"), over=$("#over"), ctx=over.getContext("2d");
+const tmp=document.createElement("canvas"), tctx=tmp.getContext("2d",{willReadFrequently:true});
+let stream=null, rodando=false, hist=[], travado=null, ultimoQuad=null, alunoQR=null, semQR=0;
+let semCartao=0, giroLayout=0;
+
+async function iniciar(){
+  if(!provaAtiva()){ irPara("casa"); return; }
+  try{ stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},
+    width:{ideal:1280},height:{ideal:960}},audio:false});
+  }catch(e){ faixa("Câmera indisponível","Use “Usar foto” ou a aba Manual",true);
+    $("#acoes2").style.display="flex"; return; }
+  video.srcObject=stream; await video.play();
+  rodando=true; hist=[]; travado=null; alunoQR=null; semQR=0; semCartao=0;
+  $("#acoes").innerHTML=""; $("#acoes2").style.display="flex"; $("#grade").hidden=false;
+  desenhaGrade(null,false); laco();
+}
+function parar(){
+  rodando=false;
+  if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;}
+  video.srcObject=null; ctx.clearRect(0,0,over.width,over.height);
+  $("#grade").hidden=true; $("#acoes2").style.display="none";
+  $("#acoes").innerHTML='<button class="btn" id="bIniciar">Iniciar câmera</button>';
+  $("#bIniciar").onclick=iniciar;
+  const p=provaAtiva();
+  faixa("Câmera parada", p?resDa(p.id).length+" cartões salvos":"Escolha uma prova");
+}
+function faixa(t,s,al){ $("#ftit").textContent=t; $("#fsub").textContent=s;
+  $("#dot").style.background=al?"var(--coral)":(travado?"var(--mint)":"var(--amber)"); }
+let falhas=0;
+function laco(){
+  if(!rodando) return;
+  try{
+    if(video.readyState>=2 && !travado) processar();
+    falhas=0;
+  }catch(err){
+    console.error("quadro descartado:",err);
+    if(++falhas===8) faixa("Erro na leitura","Recarregue a página; confira se todos os arquivos subiram",true);
+  }
+  setTimeout(()=>requestAnimationFrame(laco),70);
+}
+function processar(){
+  const vw=video.videoWidth, vh=video.videoHeight; if(!vw) return;
+  const alvo=Math.min(1100,vw);
+  tmp.width=alvo; tmp.height=Math.round(vh*alvo/vw);
+  tctx.drawImage(video,0,0,tmp.width,tmp.height);
+  analisar(tctx.getImageData(0,0,tmp.width,tmp.height),true);
+}
+/* se o cartão some por muito tempo, testa os outros formatos cadastrados —
+   resolve o caso de apontar a câmera para a prova errada */
+function tentarOutroLayout(){
+  const fmts=[];
+  E.provas.forEach(p=>{ const k=p.nq+"x"+p.no;
+    if(!fmts.some(f=>f.k===k)) fmts.push({k,nq:p.nq,no:p.no}); });
+  if(fmts.length<2) return false;
+  giroLayout=(giroLayout+1)%fmts.length;
+  const f=fmts[giroLayout];
+  return aplicarLayout(f.nq,f.no);
+}
+function analisar(imgData,aoVivo){
+  const src=cinza(imgData), quad=fiduciais(reduzir(src,620));
+  ultimoQuad=quad;
+  if(aoVivo) pintar(quad,imgData.width,imgData.height);
+  if(!quad){ hist=[]; desenhaGrade(null,false);
+    if(aoVivo && ++semCartao%28===0 && tentarOutroLayout())
+      faixa("Ajustando o formato…","Testando outro tamanho de cartão");
+    else faixa("Procurando o cartão","Enquadre a moldura tracejada inteira");
+    return false; }
+  semCartao=0;
+  if(!alunoQR){ const p=lerQR(src,quad);
+    if(p){ const r=aplicarQR(p);
+      if(r==="trocou"){ hist=[]; faixa("Formato ajustado","Mantenha o cartão enquadrado"); return false; }
+      if(r) semQR=0; else semQR++;
+    } else semQR++; }
+  const L=lerBolhas(src,quad); if(!L) return false;
+  desenhaGrade(L.R,false);
+  if(!alunoQR && semQR<=40){
+    faixa("Cartão localizado","Aproxime um pouco para o QR entrar em foco"); return false; }
+  if(!alunoQR){ faixa("QR ilegível","Use a aba Manual para este cartão",true); return false; }
+  const ch=L.R.join("|"); hist.push(ch); if(hist.length>3) hist.shift();
+  if(hist.length===3 && hist[0]===hist[1] && hist[1]===hist[2]){ travar(L); return true; }
+  faixa("Lendo "+primeiroNome(alunoQR.nome)+"…",
+        alunoQR.turma+" · nº "+alunoQR.numero+" · "+L.R.filter(Boolean).length+"/"+NQ);
+  return false;
+}
+/* DBM2/DBM3 = 10 questões, 5 alternativas.  DBM4 traz a assinatura do layout. */
+function aplicarQR(p){
+  const t=String(p).split("|");
+  if(!/^DBM[234]$/.test(t[0]||"")||t.length<3) return false;
+  const g=(t[2]||"").toUpperCase();
+  if(!/^[A-E]{5,30}$/.test(g)) return false;
+  let nq=g.length, no=5;
+  if(t[0]==="DBM4"){ const a=lerAssinatura(t[6]);
+    if(a){ nq=a.nq; no=a.no; } }
+  if(nq!==g.length) return false;
+  const codigo=(t[1]||"").trim();
+  const turma=(t[3]||"").trim(), numero=(t[4]||"").trim(), nome=(t[5]||"").trim();
+  if(!nome) return false;
+
+  // achar (ou criar) a prova correspondente a este cartão
+  let pr=E.provas.find(x=>x.codigo===codigo&&x.nq===nq&&x.no===no)
+      || E.provas.find(x=>x.codigo===codigo);
+  if(!pr){
+    let tu=E.turmas.find(x=>x.nome.toUpperCase()===turma.toUpperCase());
+    if(!tu){ tu={id:"t-"+turma,escola:"jc",nome:turma,serie:"—",
+      disciplina:"Matemática",alunos:[]}; E.turmas.push(tu); }
+    pr={id:uid("p"),turma:tu.id,codigo:codigo||"PROVA",titulo:"",nq,no,
+        gabC:inferirCanonico(g,turma,numero,nq,no),habs:[],criada:Date.now()};
+    E.provas.push(pr);
+  }
+  const trocou=(pr.id!==E.ativa);
+  if(trocou){ E.ativa=pr.id; refletirBarra(); }
+  const mudouLayout=aplicarLayout(pr.nq,pr.no);
+
+  const tu=turmaDe(pr.turma);
+  if(tu&&numero&&!tu.alunos.some(a=>a.numero===numero)){
+    tu.alunos.push({numero,nome}); tu.alunos.sort((a,b)=>ordNum(a.numero,b.numero)); }
+
+  alunoQR={turma:tu?tu.nome:turma,numero,nome,gab:g};
+  salvar(); montarManual();
+  return mudouLayout?"trocou":true;
+}
+function inferirCanonico(gabAluno,turma,numero,nq,no){
+  const {oq,oa}=embaralharProva(nq,no,turma,numero);
+  const letras=["A","B","C","D","E"].slice(0,no);
+  const out=new Array(nq).fill(letras[0]);
+  for(let i=0;i<nq;i++){
+    const k=letras.indexOf(gabAluno[i]);
+    if(k>=0) out[oq[i]]=letras[oa[i][k]];
+  }
+  return out.join("");
+}
+function pintar(quad,w,h){
+  const r=video.getBoundingClientRect(), dpr=devicePixelRatio||1;
+  over.width=r.width*dpr; over.height=r.height*dpr;
+  over.style.width=r.width+"px"; over.style.height=r.height+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,r.width,r.height);
+  if(!quad) return;
+  const e=Math.max(r.width/w,r.height/h), ox=(r.width-w*e)/2, oy=(r.height-h*e)/2;
+  ctx.beginPath(); quad.forEach(([x,y],i)=>ctx[i?"lineTo":"moveTo"](x*e+ox,y*e+oy));
+  ctx.closePath(); ctx.strokeStyle=travado?"#34D399":"#F97316"; ctx.lineWidth=3.5;
+  ctx.setLineDash(travado?[]:[13,9]); ctx.stroke(); ctx.setLineDash([]);
+  quad.forEach(([x,y])=>{ ctx.beginPath(); ctx.arc(x*e+ox,y*e+oy,6,0,6.2832);
+    ctx.fillStyle=travado?"#34D399":"#F97316"; ctx.fill(); });
+}
+function desenhaGrade(R,lk){
+  const g=$("#grade");
+  if(!g.dataset.pronto){ let h='<span></span>'+LAY.options.map(o=>`<span class="h">${o}</span>`).join("");
+    for(let q=1;q<=NQ;q++){ h+=`<span class="q">${q}</span>`;
+      for(let k=0;k<NO;k++) h+=`<i data-q="${q}" data-k="${k}"></i>`; }
+    g.innerHTML=h; g.dataset.pronto="1";
+    g.style.gridTemplateColumns="auto repeat("+NO+",14px)"; }
+  g.querySelectorAll("i").forEach(el=>{
+    const on=R && R[+el.dataset.q-1]===LAY.options[+el.dataset.k];
+    el.className=on?(lk?"lk":"on"):""; });
+}
+
+/* ═════════ 7. CONFERÊNCIA ═════════ */
+let atual=null;
+function travar(L){
+  travado=true; atual={R:L.R.slice(),mark:L.mark.slice()};
+  desenhaGrade(L.R,true); pintar(ultimoQuad,tmp.width,tmp.height);
+  if(navigator.vibrate) try{navigator.vibrate(55);}catch(e){}
+  montarPainel();
+}
+function montarPainel(){
+  const gab=alunoQR.gab, p=provaAtiva();
+  const n=atual.R.reduce((s,r,i)=>s+(r&&r===gab[i]?1:0),0);
+  const nota10=p.nq?(10*n/p.nq):0;
+  $("#ntv").textContent=n;
+  $("#ntv").style.color=nota10>=6?"var(--mint)":(nota10>=4?"var(--amber)":"var(--coral)");
+  $("#ntd").textContent=`de ${p.nq}  ·  ${pct(n,p.nq)}%  ·  nota ${nota10.toFixed(1)}`;
+  const rep=E.res.find(a=>a.prova===p.id&&a.numero===alunoQR.numero);
+  $("#boxAluno").innerHTML=`<div class="card" style="margin:0">
+      <h3>${esc(alunoQR.nome)}</h3><p>${esc(alunoQR.turma)} · nº ${esc(alunoQR.numero)}</p></div>`+
+    (rep?`<div class="aviso" style="margin-top:9px">Já corrigido (${rep.acertos} acertos). Salvar substitui o registro, sem duplicar.</div>`:"");
+  const amb=atual.mark.map((m,i)=>m!=="OK"?i+1:0).filter(Boolean);
+  $("#avAmb").hidden=!amb.length;
+  if(amb.length) $("#avAmb").textContent=`Questão ${amb.join(", ")}: sem marcação clara. Confira no papel.`;
+  $("#conf").innerHTML=atual.R.map((r,i)=>{
+    const cls=r===null?"vz":(r===gab[i]?"ok":"no");
+    return `<button class="qc ${cls}" data-i="${i}"><div class="n">${String(i+1).padStart(2,"0")}</div>
+      <div class="a">${r||"—"}</div><div class="g">gab ${gab[i]}</div></button>`;}).join("");
+  $("#conf").querySelectorAll(".qc").forEach(b=>b.onclick=()=>{
+    const i=+b.dataset.i, o=[...LAY.options,null];
+    atual.R[i]=o[(o.indexOf(atual.R[i])+1)%o.length]; montarPainel(); });
+  $("#painel").classList.add("on");
+}
+$("#bDescartar").onclick=()=>fecharPainel();
+$("#bSalvar").onclick=()=>{
+  registrar({numero:alunoQR.numero,nome:alunoQR.nome,gab:alunoQR.gab,
+             R:atual.R,origem:"auto"});
+  fecharPainel(); };
+function fecharPainel(){
+  $("#painel").classList.remove("on");
+  atual=null; travado=null; hist=[]; alunoQR=null; semQR=0; desenhaGrade(null,false);
+  const p=provaAtiva();
+  faixa("Pronto para o próximo", (p?resDa(p.id).length:0)+" cartões salvos");
+}
+
+/* ═════════ 8. CORREÇÃO MANUAL ═════════ */
+let manAluno=null, manR=[];
+function montarManual(){
+  const box=$("#manPasso"), p=provaAtiva(), t=turmaAtiva();
+  if(!p||!t){ box.innerHTML='<div class="vazio"><b>Nenhuma prova selecionada</b>Escolha a turma e a prova na aba Turmas.</div>'; return; }
+  if(!t.alunos.length){ box.innerHTML=`<div class="vazio"><b>Turma ${esc(t.nome)} sem estudantes</b>Cadastre a lista em Turmas › ${esc(t.nome)} › Estudantes.</div>`; return; }
+  if(!manAluno){
+    box.innerHTML=`<div class="rot">Escolha o estudante — ${esc(t.nome)} · ${esc(p.codigo)}</div>`+
+      t.alunos.map(a=>{
+        const j=E.res.find(x=>x.prova===p.id&&x.numero===a.numero);
+        return `<button class="aluno" data-n="${esc(a.numero)}"><div style="flex:1;min-width:0">
+          <div class="nm">${esc(a.nome)}</div>
+          <div class="rs">nº ${esc(a.numero)}${j?" · já corrigido":""}</div></div>
+          <div class="nt" style="color:${j?"var(--mint)":"var(--mute)"}">${j?j.acertos:"›"}</div></button>`;
+      }).join("");
+    box.querySelectorAll("[data-n]").forEach(b=>b.onclick=()=>{
+      manAluno=b.dataset.n;
+      const j=E.res.find(x=>x.prova===p.id&&x.numero===manAluno);
+      manR=j?j.R.slice():new Array(p.nq).fill(null);
+      montarManual(); });
+    return; }
+  const al=t.alunos.find(a=>a.numero===manAluno);
+  const gab=gabaritoDe(t.nome,manAluno);
+  box.innerHTML=`<button class="btn gho" id="bVolta2" style="margin-bottom:12px">‹ Trocar estudante</button>
+    <div class="card"><h3>${esc(al.nome)}</h3><p>${esc(t.nome)} · nº ${esc(manAluno)} · ${esc(p.codigo)}</p></div>
+    <div class="rot">Toque nas alternativas marcadas pelo aluno</div>
+    <div id="manGridBox"></div>
+    <div class="linha" style="margin-top:18px">
+      <button class="btn gho" id="bLimpaMan">Limpar</button>
+      <button class="btn" id="bEnviaMan">Enviar</button></div>`;
+  const gb=$("#manGridBox");
+  gb.style.setProperty("--no",p.no);
+  gb.innerHTML=`<div class="opt" style="grid-template-columns:auto repeat(${p.no},1fr)"><span class="qn"></span>${
+      LAY.options.map(o=>`<span style="text-align:center;color:var(--mute);font-size:10px">${o}</span>`).join("")}</div>`+
+    Array.from({length:p.nq},(_,q)=>`<div class="opt" style="grid-template-columns:auto repeat(${p.no},1fr)">
+      <span class="qn">${String(q+1).padStart(2,"0")}</span>`+
+      LAY.options.map(o=>`<button data-q="${q}" data-o="${o}"${manR[q]===o?' class="sel"':''}>${o}</button>`).join("")+
+      `</div>`).join("");
+  gb.querySelectorAll("[data-q]").forEach(b=>b.onclick=()=>{
+    const q=+b.dataset.q, o=b.dataset.o;
+    manR[q]=(manR[q]===o)?null:o;
+    gb.querySelectorAll(`[data-q="${q}"]`).forEach(x=>
+      x.classList.toggle("sel",manR[q]===x.dataset.o)); });
+  $("#bVolta2").onclick=()=>{manAluno=null;montarManual();};
+  $("#bLimpaMan").onclick=()=>{manR=new Array(p.nq).fill(null);montarManual();};
+  $("#bEnviaMan").onclick=()=>{
+    const r=registrar({numero:manAluno,nome:al.nome,R:manR,origem:"manual"});
+    if(!r){ alert("Não foi possível calcular o gabarito desta prova."); return; }
+    alert(`${al.nome}\n${r.acertos} acertos de ${p.nq} — nota ${(10*r.acertos/p.nq).toFixed(1)}.`);
+    manAluno=null; montarManual(); irPara("res"); };
+}
+
+/* ═════════ 9. RESULTADOS ═════════ */
+function pintarResultados(){
+  const p=provaAtiva(), t=turmaAtiva();
+  if(!p){ $("#pill").hidden=true; $("#resAcoes").hidden=true; $("#resSub").textContent="";
+    $("#resLista").innerHTML='<div class="vazio"><b>Nenhuma prova selecionada</b>Escolha a turma e a prova na aba Turmas.</div>'; return; }
+  const A=resDa(p.id).slice().sort((a,b)=>ordNum(a.numero,b.numero));
+  $("#pill").hidden=!A.length; $("#pill").textContent=A.length;
+  $("#resAcoes").hidden=!A.length;
+  $("#resSub").textContent=A.length
+    ? `${A.length} de ${t.alunos.length||A.length} corrigidos · ${p.codigo} · ${t.nome}`
+    : "Nenhum cartão corrigido nesta prova ainda.";
+  if(!A.length){ $("#resLista").innerHTML='<div class="vazio"><b>Sem resultados</b>Leia um cartão na aba Ler ou use a Correção manual.</div>'; return; }
+  $("#resLista").innerHTML=A.map((a,i)=>{
+    const n10=10*a.acertos/p.nq;
+    return `<button class="aluno" data-x="${i}"><div style="flex:1;min-width:0">
+      <div class="nm"><span style="color:var(--mute);font-family:var(--mono);font-size:12px">${esc(a.numero)} </span>${esc(a.nome)}</div>
+      <div class="rs">${a.acertos}/${p.nq} acertos${a.origem==="manual"?" · manual":""}</div></div>
+      <div class="nt" style="color:${n10>=6?"var(--mint)":n10>=4?"var(--amber)":"var(--coral)"}">${n10.toFixed(1)}</div>
+    </button><div id="det${i}"></div>`;}).join("");
+  $("#resLista").querySelectorAll("[data-x]").forEach(b=>b.onclick=()=>{
+    const i=+b.dataset.x, d=$("#det"+i);
+    if(d.innerHTML){ d.innerHTML=""; return; }
+    const a=A[i];
+    d.innerHTML=`<div class="card" style="margin:-3px 0 9px">
+      <p style="margin-bottom:8px"><b style="color:var(--mint)">Acertou:</b> ${a.certas.length?a.certas.join(", "):"—"}<br>
+      <b style="color:var(--coral)">Errou:</b> ${a.erradas.length?a.erradas.join(", "):"—"}</p>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px">${
+        a.R.map((r,q)=>`<div style="text-align:center;background:var(--slate);border-radius:8px;padding:5px 2px">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--mute)">Q${q+1}</div>
+          <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:${r===a.gab[q]?"var(--mint)":"var(--coral)"}">${r||"—"}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--mute)">${a.gab[q]}</div></div>`).join("")}</div>
+      <button class="btn gho" style="margin-top:11px;padding:9px" data-rm="${i}">Remover este registro</button></div>`;
+    d.querySelector("[data-rm]").onclick=()=>{
+      if(!confirm("Remover "+a.nome+"?")) return;
+      E.res=E.res.filter(x=>chave(x)!==chave(a)); salvar();
+      pintarResultados(); pintarDesempenho(); };
+  });
+}
+
+/* ═════════ 10. ANÁLISE DA TURMA ═════════ */
+function estat(A){
+  const p=provaAtiva(); if(!A.length||!p) return null;
+  const n=A.length, notas=A.map(a=>10*a.acertos/p.nq);
+  const med=notas.reduce((s,x)=>s+x,0)/n;
+  const item=[], hab={};
+  for(let q=0;q<p.nq;q++){
+    const ac=A.filter(a=>a.Rc[q]&&a.Rc[q]===p.gabC[q]).length;
+    const v=100*ac/n; item.push(v);
+    const h=(p.habs[q]||("Questão "+(q+1)));
+    (hab[h]=hab[h]||[]).push(v);
+  }
+  const habs=Object.entries(hab).map(([h,v])=>[h,v.reduce((s,x)=>s+x,0)/v.length])
+    .sort((a,b)=>a[1]-b[1]);
+  return {n,med,notas,item,habs,nq:p.nq,
+    mediaAc:A.reduce((s,a)=>s+a.acertos,0)/n,
+    mediaEr:A.reduce((s,a)=>s+a.erros,0)/n,
+    aprov:notas.filter(x=>x>=6).length};
+}
+function diagnostico(s){
+  const fracas=s.habs.filter(([,v])=>v<50), fortes=s.habs.filter(([,v])=>v>=75);
+  const piores=s.item.map((v,q)=>[q+1,v]).sort((a,b)=>a[1]-b[1]).slice(0,3);
+  const melhores=s.item.map((v,q)=>[q+1,v]).sort((a,b)=>b[1]-a[1]).slice(0,3);
+  const L=[];
+  L.push(`<div class="diag"><b>Leitura geral</b>Média ${s.med.toFixed(1)} de 10 (${(s.med*10).toFixed(0)}% de aproveitamento), com ${s.aprov} de ${s.n} acima de 6,0. Cada estudante acertou ${s.mediaAc.toFixed(1)} das ${s.nq} questões, em média.</div>`);
+  if(fracas.length) L.push(`<div class="diag"><b>Precisa ser retomado</b><ul>${
+    fracas.map(([h,v])=>`<li>${esc(h)} — ${Math.round(v)}% de acerto</li>`).join("")}</ul></div>`);
+  else L.push(`<div class="diag"><b>Precisa ser retomado</b>Nenhuma habilidade ficou abaixo de 50%. A mais frágil foi ${esc(s.habs[0][0])}, com ${Math.round(s.habs[0][1])}%.</div>`);
+  if(fortes.length) L.push(`<div class="diag"><b>Pontos fortes</b><ul>${
+    fortes.map(([h,v])=>`<li>${esc(h)} — ${Math.round(v)}%</li>`).join("")}</ul></div>`);
+  L.push(`<div class="diag"><b>Questões críticas</b>Menor acerto: ${
+    piores.map(([q,v])=>`Q${q} (${Math.round(v)}%)`).join(", ")}. Maior acerto: ${
+    melhores.map(([q,v])=>`Q${q} (${Math.round(v)}%)`).join(", ")}.</div>`);
+  const rec=[];
+  fracas.forEach(([h])=>rec.push(`Retomar <b>${esc(h)}</b> com exercícios dirigidos antes da próxima avaliação.`));
+  if(piores[0][1]<40) rec.push(`Resolver a Q${piores[0][0]} passo a passo no quadro — menos de 40% da turma acertou.`);
+  if(s.med<5) rec.push("Média abaixo de 5,0: considerar uma aula de revisão geral antes de avançar no conteúdo.");
+  if(s.aprov/s.n>0.7) rec.push("Turma majoritariamente acima da média: dá para avançar, atendendo em separado quem ficou abaixo de 4,0.");
+  const baixos=s.notas.filter(x=>x<4).length;
+  if(baixos) rec.push(`${baixos} estudante(s) abaixo de 4,0 — vale acompanhamento individual.`);
+  if(!rec.length) rec.push("Desempenho equilibrado. Seguir o planejamento.");
+  L.push(`<div class="diag"><b>Recomendações</b><ul>${rec.map(r=>`<li>${r}</li>`).join("")}</ul></div>`);
+  return L.join("");
+}
+function pintarDesempenho(){
+  const p=provaAtiva(), t=turmaAtiva();
+  if(!p){ $("#desSub").textContent="";
+    $("#desCorpo").innerHTML='<div class="vazio"><b>Nenhuma prova selecionada</b>Escolha a turma e a prova na aba Turmas.</div>'; return; }
+  const A=resDa(p.id), s=estat(A);
+  if(!s){ $("#desSub").textContent="";
+    $("#desCorpo").innerHTML='<div class="vazio"><b>Sem dados ainda</b>As estatísticas aparecem a partir do primeiro cartão corrigido.</div>'; return; }
+  $("#desSub").textContent=`${s.n} de ${t.alunos.length||s.n} corrigidos · ${p.codigo} · turma ${t.nome}. Estatísticas parciais, atualizadas a cada correção.`;
+  $("#desCorpo").innerHTML=`
+    <div class="kpi">
+      <div><div class="v">${s.med.toFixed(1)}</div><div class="l">Média</div></div>
+      <div><div class="v">${(s.med*10).toFixed(0)}%</div><div class="l">Aproveitam.</div></div>
+      <div><div class="v">${s.aprov}<span style="font-size:13px;color:var(--mute)">/${s.n}</span></div><div class="l">≥ 6,0</div></div>
+      <div><div class="v">${s.mediaAc.toFixed(1)}</div><div class="l">Acertos méd.</div></div>
+      <div><div class="v">${s.mediaEr.toFixed(1)}</div><div class="l">Erros méd.</div></div>
+      <div><div class="v">${Math.min(...s.notas).toFixed(1)}–${Math.max(...s.notas).toFixed(1)}</div><div class="l">Menor–maior</div></div>
+    </div>
+    <div class="rot">Acerto por questão</div>
+    ${s.item.map((v,q)=>`<div class="barra"><span class="q">${String(q+1).padStart(2,"0")}</span>
+      <span class="t"><span class="f ${v<50?"baixo":v<75?"medio":""}" style="width:${v}%"></span></span>
+      <span class="p">${Math.round(v)}%</span></div>`).join("")}
+    <div class="rot">Desempenho por habilidade</div>
+    ${s.habs.map(([h,v])=>`<div class="barra"><span class="lb">${esc(h)}</span>
+      <span class="t"><span class="f ${v<50?"baixo":v<75?"medio":""}" style="width:${v}%"></span></span>
+      <span class="p">${Math.round(v)}%</span></div>`).join("")}
+    <div class="rot">Parecer automático</div>
+    ${diagnostico(s)}
+    <button class="btn sec" id="bRel" style="margin-top:14px">Baixar relatório</button>`;
+  $("#bRel").onclick=()=>baixarRelatorio(A,s);
+}
+function baixarRelatorio(A,s){
+  const p=provaAtiva(), t=turmaAtiva(), e=escolaDe(t.escola);
+  const lin=[], L=x=>lin.push(x);
+  L("RELATÓRIO DE DESEMPENHO");
+  L(e.nome); L("Turma "+t.nome+" · "+t.serie+" · "+t.disciplina);
+  L("Prova: "+p.codigo+(p.titulo?" — "+p.titulo:"")+"   ("+p.nq+" questões, A–"+LETRAS_ATE(p.no)+")");
+  L("Gerado em "+new Date().toLocaleString("pt-BR")); L("");
+  L("ESTATÍSTICAS GERAIS");
+  L("  Estudantes corrigidos ...... "+s.n+" de "+(t.alunos.length||s.n));
+  L("  Média das notas ............ "+s.med.toFixed(2)+" de 10");
+  L("  Aproveitamento médio ....... "+(s.med*10).toFixed(1)+"%");
+  L("  Média de acertos ........... "+s.mediaAc.toFixed(2)+" de "+p.nq);
+  L("  Média de erros ............. "+s.mediaEr.toFixed(2));
+  L("  Nota mínima / máxima ....... "+Math.min(...s.notas).toFixed(1)+" / "+Math.max(...s.notas).toFixed(1));
+  L("  Com nota 6,0 ou mais ....... "+s.aprov+" ("+pct(s.aprov,s.n)+"%)"); L("");
+  L("ANÁLISE DAS QUESTÕES");
+  s.item.map((v,q)=>[q+1,v]).sort((a,b)=>b[1]-a[1]).forEach(([q,v])=>
+    L("  Q"+String(q).padStart(2,"0")+"  acerto "+String(Math.round(v)).padStart(3)+"%   erro "+
+      String(Math.round(100-v)).padStart(3)+"%   "+(p.habs[q-1]||"")));
+  L("");
+  L("ANÁLISE POR HABILIDADE  (da mais frágil para a mais dominada)");
+  s.habs.forEach(([h,v])=>L("  "+String(Math.round(v)).padStart(3)+"%   "+h));
+  L(""); L("PARECER");
+  L(diagnostico(s).replace(/<li>/g,"\n  - ").replace(/<b>/g,"\n").replace(/<[^>]+>/g," ")
+     .replace(/\n{3,}/g,"\n\n").replace(/[ \t]+/g," ").trim());
+  L(""); L("NOTAS INDIVIDUAIS");
+  A.slice().sort((a,b)=>ordNum(a.numero,b.numero)).forEach(a=>
+    L("  "+String(a.numero).padEnd(4)+String(a.nome).padEnd(42)+
+      "nota "+(10*a.acertos/p.nq).toFixed(1).padStart(4)+"   acertos "+
+      String(a.acertos).padStart(2)+"/"+p.nq+"   errou: "+(a.erradas.join(",")||"—")));
+  baixar(lin.join("\r\n"),`relatorio_${t.nome}_${p.codigo}.txt`,"text/plain");
+}
+function baixar(txt,nome,tipo){
+  const u=URL.createObjectURL(new Blob(["\uFEFF"+txt],{type:tipo+";charset=utf-8"}));
+  const a=document.createElement("a"); a.href=u; a.download=nome; a.click();
+  setTimeout(()=>URL.revokeObjectURL(u),1500);
+}
+$("#bCsv").onclick=()=>{
+  const p=provaAtiva(), t=turmaAtiva(); if(!p) return;
+  const cab=["escola","turma","numero","aluno","nota","acertos","erros","aproveitamento",
+    "questoes_erradas","origem","prova",...Array.from({length:p.nq},(_,i)=>"Q"+(i+1))];
+  const A=resDa(p.id).slice().sort((a,b)=>ordNum(a.numero,b.numero));
+  const e=escolaDe(t.escola);
+  const lin=A.map(a=>[e.curto,t.nome,a.numero,`"${String(a.nome).replace(/"/g,'""')}"`,
+    (10*a.acertos/p.nq).toFixed(1).replace(".",","),a.acertos,a.erros,
+    pct(a.acertos,p.nq)+"%",`"${a.erradas.join(", ")}"`,a.origem,p.codigo,
+    ...a.R.map(r=>r||"")].join(";"));
+  baixar([cab.join(";"),...lin].join("\r\n"),
+    `notas_${t.nome}_${p.codigo}_${new Date().toISOString().slice(0,10)}.csv`,"text/csv");
+};
+$("#bZerar").onclick=()=>{
+  const p=provaAtiva(); if(!p) return;
+  const n=resDa(p.id).length;
+  if(!confirm("Apagar os "+n+" resultados desta prova? A prova e a turma continuam.")) return;
+  E.res=E.res.filter(r=>r.prova!==p.id); salvar();
+  pintarResultados(); pintarDesempenho(); montarManual(); };
+
+/* ═════════ 11. FOTO E NAVEGAÇÃO ═════════ */
+$("#bFoto").onclick=()=>$("#arq").click();
+$("#arq").onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const im=new Image();
+  im.onload=()=>{
+    const alvo=Math.min(1400,im.width);
+    tmp.width=alvo; tmp.height=Math.round(im.height*alvo/im.width);
+    tctx.drawImage(im,0,0,tmp.width,tmp.height);
+    const d=tctx.getImageData(0,0,tmp.width,tmp.height);
+    let src=cinza(d), quad=fiduciais(reduzir(src,700));
+    if(!quad && tentarOutroLayout()) quad=fiduciais(reduzir(src,700));
+    if(!quad){ faixa("Cartão não encontrado na foto","Enquadre a moldura inteira",true); return; }
+    const p=lerQR(src,quad);
+    const r=p?aplicarQR(p):false;
+    if(r==="trocou"){ quad=fiduciais(reduzir(src,700)); }
+    if(!r){ faixa("QR ilegível nesta foto","Use a aba Manual",true); return; }
+    if(!quad) return;
+    const L=lerBolhas(src,quad); if(!L) return;
+    ultimoQuad=quad; travar(L); };
+  im.src=URL.createObjectURL(f); e.target.value=""; };
+
+function irPara(v){
+  document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x.dataset.v===v));
+  document.querySelectorAll(".view").forEach(s=>s.classList.toggle("on",s.id==="v-"+v));
+  if(v!=="ler"&&rodando) parar();
+  if(v==="casa") montarCasa();
+  if(v==="man") montarManual();
+  if(v==="des") pintarDesempenho();
+  if(v==="res") pintarResultados();
+}
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>irPara(b.dataset.v));
+$("#bIniciar").onclick=iniciar; $("#bParar").onclick=parar;
+$("#bTrocar").onclick=()=>{ casaNivel="turmas"; irPara("casa"); };
+
+(function conferirPecas(){
+  const faltando=[];
+  if(typeof jsQR!=="function") faltando.push("jsqr.js");
+  if(typeof embaralharProva!=="function") faltando.push("embaralho.js");
+  if(typeof montarLayout!=="function") faltando.push("layout.js");
+  if(typeof fiduciais!=="function") faltando.push("núcleo de leitura");
+  if(typeof window.jspdf==="undefined") faltando.push("jspdf.umd.min.js");
+  if(typeof qrcode!=="function") faltando.push("qrcode.min.js");
+  if(typeof gerarProvas!=="function") faltando.push("gerador.js");
+  if(typeof registrarFontes!=="function") faltando.push("fonte.js");
+  if(faltando.length){
+    const d=document.createElement("div");
+    d.className="aviso";
+    d.style.cssText="position:fixed;left:10px;right:10px;top:calc(10px + env(safe-area-inset-top));z-index:99";
+    d.textContent="Faltou carregar: "+faltando.join(", ")+". Envie todos os arquivos para o GitHub e recarregue.";
+    document.body.appendChild(d);
+  }
+})();
+
+if(E.ativa && provaDe(E.ativa)) ativar(E.ativa); else refletirBarra();
+montarCasa(); pintarResultados(); pintarDesempenho(); montarManual();
+faixa("Toque em iniciar câmera",
+  provaAtiva()?resDa(E.ativa).length+" cartões salvos":"Escolha a prova na aba Turmas");
+</script>
+</body>
+</html>
