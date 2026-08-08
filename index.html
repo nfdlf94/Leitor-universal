@@ -601,7 +601,7 @@ let E=(()=>{
           alunos:[],periodo:{tipo:"bimestre",qtd:4}};
           base.turmas.push(t); }
         Object.entries(mapa).forEach(([num,nome])=>{
-          if(!t.alunos.some(a=>a.numero===num)) t.alunos.push({numero:num,nome}); });
+          if(!t.alunos.some(a=>a.numero===num)) t.alunos.push({numero:num,nome,desde:1,ate:null}); });
         t.alunos.sort((a,b)=>ordNum(a.numero,b.numero));
       });
       const alvo=base.turmas.filter(t=>(velho.turmas||{})[t.nome]);
@@ -662,6 +662,15 @@ function refletirBarra(){
 }
 const LETRAS_ATE=n=>["A","B","C","D","E"][n-1];
 const calendario=t=>(t&&t.periodo)||{tipo:"bimestre",qtd:4};
+/* Um estudante pertence à turma de um período de entrada até um de saída.
+   Quem se transfere NÃO é apagado: as notas dos períodos que ele cursou
+   continuam valendo, e ele some das listas dos períodos seguintes. */
+const entrou=a=>a.desde||1;
+const saiu=a=>(a.ate==null?null:a.ate);
+const naTurmaEm=(a,per)=>entrou(a)<=per && (saiu(a)==null || saiu(a)>=per);
+const ativo=a=>saiu(a)==null;
+function alunosEm(t,per){ return (t.alunos||[]).filter(a=>naTurmaEm(a,per)); }
+function temNotas(t,a){ return E.res.some(r=>r.turma===t.id && r.numero===a.numero); }
 const nomePeriodo=(t,n)=>n+"º "+calendario(t).tipo;
 const periodosDe=t=>Array.from({length:calendario(t).qtd},(_,i)=>i+1);
 const provasDoPeriodo=(tid,n)=>provasDaTurma(tid).filter(p=>(p.periodo||1)===n);
@@ -687,6 +696,38 @@ function canonizar(R,nomeTurma,numero){
     if(k>=0) out[oq[i]]=LAY.options[oa[i][k]];
   }
   return out;
+}
+
+/* Refaz as contas de todos os registros de uma prova a partir das
+   respostas já lidas. Serve para quando o gabarito estava errado: as
+   marcações do papel continuam válidas, só a conferência muda. */
+function recalcular(pr){
+  const t=turmaDe(pr.turma); if(!t) return 0;
+  const letras=["A","B","C","D","E"].slice(0,pr.no);
+  let n=0;
+  E.res.filter(r=>r.prova===pr.id).forEach(r=>{
+    const {oq,oa}=embaralharProva(pr.nq,pr.no,t.nome,r.numero);
+    let gab="";
+    for(let i=0;i<pr.nq;i++){
+      const certa=letras.indexOf(pr.gabC[oq[i]]);
+      gab+=letras[oa[i].indexOf(certa)];
+    }
+    const Rc=new Array(pr.nq).fill(null);
+    for(let i=0;i<pr.nq;i++){
+      if(!r.R[i]) continue;
+      const k=letras.indexOf(r.R[i]);
+      if(k>=0) Rc[oq[i]]=letras[oa[i][k]];
+    }
+    let acertos=0; const certas=[],erradas=[];
+    for(let i=0;i<pr.nq;i++){
+      if(r.R[i]&&r.R[i]===gab[i]){acertos++;certas.push(i+1);} else erradas.push(i+1);
+    }
+    r.gab=gab; r.Rc=Rc; r.acertos=acertos; r.erros=pr.nq-acertos;
+    r.certas=certas; r.erradas=erradas;
+    r.notaDisc=Math.max(0,Math.min(pontosDisc(pr),r.notaDisc||0));
+    r.nota=notaFinal(pr,r); n++;
+  });
+  return n;
 }
 
 /* ═════════ 4. REGISTRO ═════════ */
@@ -738,6 +779,7 @@ function montarCasa(){
   if(casaNivel==="figuras")  return telaFiguras(box);
   if(casaNivel==="disc")     return telaDiscursivas(box);
   if(casaNivel==="fechamento") return telaFechamento(box);
+  if(casaNivel==="editar")   return telaEditar(box);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -791,7 +833,8 @@ function telaLerArquivo(box){
       placeholder='Cole aqui o JSON: {"questoes":[...]}'></textarea>
     <button class="btn" id="bColar" style="margin-top:10px">Usar este JSON</button>
     <div id="iaErro"></div>`;
-  $("#mVolta").onclick=()=>{casaNivel=p?"questoes":"provas";montarCasa();};
+  $("#mVolta").onclick=()=>{ descartarLeitura();
+    casaNivel=p?"questoes":"provas"; montarCasa(); };
   $("#bEscolher").onclick=()=>$("#iaArq").click();
   if($("#bConfig")) $("#bConfig").onclick=()=>{casaNivel="config";montarCasa();};
   $("#iaArq").onchange=async ev=>{
@@ -818,10 +861,11 @@ function telaLerArquivo(box){
 }
 
 async function lerDocx(f,p){
+  const info=t=>{ const el=$("#iaInfo"); if(el) el.innerHTML=t; };
   if(typeof mammoth==="undefined"){
-    $("#iaInfo").innerHTML='<div class="aviso" style="margin-top:10px">Faltou o arquivo mammoth.browser.min.js. Envie-o para o GitHub.</div>';
+    info('<div class="aviso" style="margin-top:10px">Faltou o arquivo mammoth.browser.min.js. Envie-o para o GitHub.</div>');
     return; }
-  $("#iaInfo").innerHTML='<div class="diag" style="margin-top:10px">Abrindo o documento…</div>';
+  info('<div class="diag" style="margin-top:10px">Abrindo o documento…</div>');
   try{
     const buf=await f.arrayBuffer();
     const txt=(await mammoth.extractRawText({arrayBuffer:buf})).value||"";
@@ -829,12 +873,12 @@ async function lerDocx(f,p){
     try{ html=(await mammoth.convertToHtml({arrayBuffer:buf})).value||""; }catch(e){}
     iaImagens=[...html.matchAll(/<img[^>]+src="(data:image\/[^;]+;base64,[^"]+)"/g)].map(m=>m[1]);
     iaTextoDoc=txt;
-    $("#iaInfo").innerHTML=`<div class="diag" style="margin-top:10px"><b>${esc(f.name)}</b>
+    info(`<div class="diag" style="margin-top:10px"><b>${esc(f.name)}</b>
       ${txt.split(/\r?\n/).filter(l=>l.trim()).length} linhas de texto e
-      ${iaImagens.length} imagem${iaImagens.length===1?"":"ns"} · lido no próprio aparelho</div>`;
+      ${iaImagens.length} imagem${iaImagens.length===1?"":"ns"} · lido no próprio aparelho</div>`);
     pintarPreDoc(p);
   }catch(e){
-    $("#iaInfo").innerHTML=`<div class="aviso" style="margin-top:10px">Não consegui abrir o Word: ${esc(e.message)}</div>`;
+    info(`<div class="aviso" style="margin-top:10px">Não consegui abrir o Word: ${esc(e.message)}</div>`);
   }
 }
 
@@ -889,7 +933,11 @@ function aplicarJson(txt,p){
     $("#iaErro").innerHTML=`<div class="aviso" style="margin-top:10px">Não consegui usar: ${esc(e.message)}</div>`;
   }
 }
-let iaTexto=null;   // texto vindo da leitura, para a tela de questões exibir
+let iaTexto=null;      // texto vindo da leitura
+let iaTextoPara=null;  // para QUAL prova ele foi lido ("novo" = cadastro em criação)
+function descartarLeitura(){
+  iaTexto=null; iaTextoPara=null; iaArquivo=null; iaTextoDoc=null; iaImagens=[];
+}
 
 const alternativasDe=d=>{
   const qs=(d&&d.questoes)||d||[];
@@ -901,17 +949,24 @@ const alternativasDe=d=>{
    vai para o cadastro com número de questões, alternativas e gabarito
    já preenchidos pela leitura — que é o caminho de quem começa do arquivo. */
 function entregarLeitura(texto,p,no){
-  iaTexto=texto;
-  if(p){ casaNivel="questoes"; montarCasa(); return; }
+  iaTexto=texto; iaTextoPara=p?p.id:"novo";
+  if(p && !substituindo){ casaNivel="questoes"; montarCasa(); return; }
   const lidas=lerQuestoes(texto);
-  casaForm={codigo:"",titulo:"",nq:Math.max(5,Math.min(30,lidas.questoes.length||10)),
+  const velha=substituindo?provaDe(substituindo):null;
+  casaForm={codigo:velha?velha.codigo:"", titulo:velha?velha.titulo:"",
+    nq:Math.max(5,Math.min(30,lidas.questoes.length||10)),
     no:no||5, gab:lidas.gabarito.indexOf("?")<0?lidas.gabarito:"",
-    habs:"", po:10, pd:0, per:ultimoPeriodo, vindoDeArquivo:true};
+    habs:velha?(velha.habs||[]).join("\n"):"",
+    po:velha?pontosObj(velha):10, pd:velha?pontosDisc(velha):0,
+    per:velha?(velha.periodo||1):ultimoPeriodo, vindoDeArquivo:true,
+    substitui:substituindo||null};
+  iaTextoPara="novo";
   casaNivel="nova"; montarCasa();
 }
 
 async function chamarIA(p){
-  const st=$("#iaStatus");
+  const alvo=$("#iaStatus");
+  const st={ set innerHTML(v){ const el=$("#iaStatus"); if(el) el.innerHTML=v; } };
   if(!iaArquivo && !iaTextoDoc){
     st.innerHTML='<div class="aviso" style="margin-top:10px">Escolha o arquivo primeiro.</div>'; return; }
   st.innerHTML='<div class="diag" style="margin-top:10px">Enviando para a Claude…</div>';
@@ -942,7 +997,7 @@ async function chamarIA(p){
     st.innerHTML=`<div class="diag" style="margin-top:10px"><b>Leitura concluída</b>
       ${u.input_tokens||"?"} tokens de entrada, ${u.output_tokens||"?"} de saída.
       Confira o texto antes de salvar.</div>`;
-    setTimeout(()=>entregarLeitura(pronto,p,no),600);
+    setTimeout(()=>{ if(casaNivel!=="ler") return; entregarLeitura(pronto,p,no); },600);
   }catch(err){
     st.innerHTML=`<div class="aviso" style="margin-top:10px">Falhou: ${esc(err.message)}<br>
       Você ainda pode usar o caminho pelo chat, abaixo.</div>`;
@@ -1080,10 +1135,73 @@ function telaDiscursivas(box){
       p.pontosDisc=soma;
     }
     p.discursivas=ds; salvar();
-    setTimeout(()=>{casaNivel="prova";montarCasa();},ds.length?700:0); };
+    setTimeout(()=>{ if(casaNivel!=="disc"||casaProva!==p.id) return;
+      casaNivel="prova"; montarCasa(); },ds.length?700:0); };
 }
 
 /* ── fechamento: média das provas do período, por estudante ─────── */
+function telaEditar(box){
+  const p=provaDe(casaProva), t=turmaDe(p.turma), n=resDa(p.id).length;
+  box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(p.codigo)}</button></div>
+    <h2>Editar a prova</h2>
+    <p class="sub">Turma ${esc(t.nome)}${n?` · ${n} estudante${n===1?"":"s"} já corrigido${n===1?"":"s"}`:""}</p>
+    ${n?`<div class="aviso">Corrigir o <b>gabarito</b> é seguro: o app refaz as notas a partir
+      das marcações já lidas. Mudar o <b>número de questões</b> ou de <b>alternativas</b> invalida
+      os cartões impressos e apaga as ${n} correções.</div>`:""}
+    <label>Código</label><input id="eCod" class="mono" value="${esc(p.codigo)}">
+    <label>Título</label><input id="eTit" value="${esc(p.titulo||"")}">
+    <label>Período</label>
+    <select id="ePer">${periodosDe(t).map(k=>
+      `<option value="${k}"${(p.periodo||1)===k?" selected":""}>${esc(nomePeriodo(t,k))}</option>`).join("")}</select>
+    <label>Gabarito canônico — ${p.nq} letras</label>
+    <input id="eGab" class="mono" value="${esc(p.gabC)}">
+    <div class="duo"><div><label>Pontos objetiva</label>
+      <input id="ePo" type="number" min="1" max="10" step="0.5" value="${pontosObj(p)}"></div>
+      <div><label>Pontos discursivas</label>
+      <input id="ePd" type="number" min="0" max="9" step="0.5" value="${pontosDisc(p)}"></div></div>
+    <div class="duo"><div><label>Nº de questões</label>
+      <input id="eNq" type="number" min="5" max="30" value="${p.nq}"></div>
+      <div><label>Alternativas</label>
+      <select id="eNo"><option value="4"${p.no===4?" selected":""}>4 (A–D)</option>
+        <option value="5"${p.no===5?" selected":""}>5 (A–E)</option></select></div></div>
+    <label>Habilidades — uma por linha</label>
+    <textarea id="eHab" spellcheck="false" style="min-height:96px">${esc((p.habs||[]).join("\n"))}</textarea>
+    <button class="btn" id="eSalvar" style="margin-top:16px">Salvar alterações</button>
+    <div id="eAviso"></div>`;
+  $("#mVolta").onclick=()=>{casaNivel="prova";montarCasa();};
+  $("#eSalvar").onclick=()=>{
+    const nq=Math.max(5,Math.min(30,parseInt($("#eNq").value,10)||p.nq));
+    const no=parseInt($("#eNo").value,10)||p.no;
+    const lim=LETRAS_ATE(no);
+    const gab=$("#eGab").value.toUpperCase().replace(new RegExp("[^A-"+lim+"]","g"),"").slice(0,nq);
+    const mudouEstrutura=(nq!==p.nq||no!==p.no);
+    if(gab.length!==nq){
+      $("#eAviso").innerHTML=`<div class="aviso" style="margin-top:10px">O gabarito precisa ter
+        ${nq} letras — está com ${gab.length}.</div>`; return; }
+    if(mudouEstrutura && n){
+      if(!confirm("Mudar de "+p.nq+"x"+p.no+" para "+nq+"x"+no+" invalida os cartões já impressos "+
+        "e apaga as "+n+" correções desta prova.\n\nContinuar?")) return;
+      E.res=E.res.filter(r=>r.prova!==p.id);
+    }
+    const gabAntigo=p.gabC;
+    p.codigo=$("#eCod").value.trim()||p.codigo;
+    p.titulo=$("#eTit").value.trim();
+    p.periodo=parseInt($("#ePer").value,10)||1;
+    p.pontosObj=parseFloat($("#ePo").value)||10;
+    p.pontosDisc=parseFloat($("#ePd").value)||0;
+    p.habs=$("#eHab").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    p.nq=nq; p.no=no; p.gabC=gab;
+    if(p.questoes&&p.questoes.length>nq) p.questoes=p.questoes.slice(0,nq);
+    const refeitas=recalcular(p);
+    aplicarLayout(p.nq,p.no); salvar(); refletirBarra();
+    pintarResultados(); pintarDesempenho(); montarManual();
+    let msg="Prova atualizada.";
+    if(gab!==gabAntigo && refeitas) msg="Gabarito corrigido — "+refeitas+" notas recalculadas.";
+    else if(mudouEstrutura) msg="Estrutura alterada. Gere os cartões novamente antes de aplicar.";
+    alert(msg);
+    casaNivel="prova"; montarCasa(); };
+}
+
 function telaFechamento(box){
   const t=turmaDe(casaTurma);
   const ps=provasDoPeriodo(t.id,casaPeriodo).slice().reverse();  // ordem cronológica
@@ -1103,7 +1221,7 @@ function telaFechamento(box){
       casaPeriodo=+b.dataset.per; telaFechamento(box); });
     return;
   }
-  const linhas=t.alunos.map(a=>{
+  const linhas=alunosEm(t,casaPeriodo).map(a=>{
     const notas=comNota.map(p=>{
       const r=E.res.find(x=>x.prova===p.id&&x.numero===a.numero);
       if(!r) return null;
@@ -1185,7 +1303,7 @@ function telaConfig(box){
 }
 
 /* ── ficha da prova: corrigir, editar questões, gerar PDF ────────── */
-let casaProva=null, casaPeriodo=1, ultimoPeriodo=1;
+let casaProva=null, casaPeriodo=1, ultimoPeriodo=1, substituindo=null;
 
 function telaProva(box){
   const p=provaDe(casaProva), t=turmaDe(p.turma);
@@ -1202,6 +1320,9 @@ function telaProva(box){
       <div class="t2">Abre a câmera com esta prova ativa</div></div><span class="ch">›</span></button>
     <button class="item" id="aArquivo"><div class="cor"><div class="t1">Subir a prova pronta</div>
       <div class="t2">Foto, PDF ou Word — o app lê e monta as questões</div>
+      </div><span class="ch">›</span></button>
+    <button class="item" id="aTrocar"><div class="cor"><div class="t1">Trocar a prova inteira</div>
+      <div class="t2">Subir outro arquivo e substituir questões e gabarito</div>
       </div><span class="ch">›</span></button>
     <button class="item" id="aQuestoes"><div class="cor"><div class="t1">Questões da prova</div>
       <div class="t2">${nq?nq+" questões digitadas":"Nenhuma questão digitada ainda"}</div></div><span class="ch">›</span></button>
@@ -1220,15 +1341,22 @@ function telaProva(box){
     <button class="item" id="aCartoes"><div class="cor"><div class="t1">Gerar só os cartões-resposta</div>
       <div class="t2">Para quem imprime a prova separadamente</div></div><span class="ch">›</span></button>
     <div id="pdfStatus"></div>
-    <button class="btn gho" id="aExcluir" style="margin-top:18px">Excluir esta prova</button>`;
+    <button class="btn sec" id="aEditar" style="margin-top:18px">Editar dados da prova</button>
+    <button class="btn gho" id="aExcluir" style="margin-top:9px">Excluir esta prova</button>`;
   $("#mVolta").onclick=()=>{casaNivel="provas";montarCasa();};
   $("#aCorrigir").onclick=()=>{ativar(p.id);irPara("ler");};
   $("#aQuestoes").onclick=()=>{casaNivel="questoes";montarCasa();};
   $("#aArquivo").onclick=()=>{casaNivel="ler";montarCasa();};
+  $("#aTrocar").onclick=()=>{
+    const n=resDa(p.id).length;
+    if(n && !confirm("Trocar a prova inteira substitui questões, gabarito e estrutura.\n\n"+
+      "As "+n+" correções desta prova serão apagadas e os cartões já impressos deixam de valer.\n\nContinuar?")) return;
+    substituindo=p.id; descartarLeitura(); casaProva=null; casaNivel="ler"; montarCasa(); };
   $("#aFiguras").onclick=()=>{casaNivel="figuras";montarCasa();};
   $("#aDisc").onclick=()=>{casaNivel="disc";montarCasa();};
   $("#aPdf").onclick=()=>gerarPDF(p,t,"prova");
   $("#aCartoes").onclick=()=>gerarPDF(p,t,"cartoes");
+  $("#aEditar").onclick=()=>{casaNivel="editar";montarCasa();};
   $("#aExcluir").onclick=()=>{
     const n=resDa(p.id).length;
     if(!confirm("Excluir a prova "+p.codigo+(n?" e seus "+n+" resultados":"")+"?")) return;
@@ -1302,7 +1430,7 @@ E) conjunto vazio
     <button class="btn gho" id="bLerArq" style="margin-top:9px">Ler de uma foto ou PDF</button>
     <p class="hint">Linhas soltas continuam o enunciado ou a alternativa anterior,
       então pode colar texto quebrado que o app remonta.</p>`;
-  if(iaTexto){ $("#txQ").value=iaTexto; iaTexto=null;
+  if(iaTexto && iaTextoPara===p.id){ $("#txQ").value=iaTexto; iaTexto=null; iaTextoPara=null;
     $("#qAviso").innerHTML='<div class="aviso">Texto vindo da leitura automática. '+
       'Confira sinais, expoentes e frações antes de salvar — é aqui que a IA erra.</div>';
   } else $("#txQ").value=questoesParaTexto(p.questoes);
@@ -1473,7 +1601,7 @@ function telaProvas(box){
   $("#mVolta").onclick=()=>{casaNivel="turmas";montarCasa();};
   $("#bAlunos").onclick=()=>{casaNivel="alunos";montarCasa();};
   $("#bNova").onclick=()=>{casaForm=null;casaNivel="nova";montarCasa();};
-  $("#bSubir").onclick=()=>{casaProva=null;casaForm=null;
+  $("#bSubir").onclick=()=>{substituindo=null;casaProva=null;casaForm=null;
     iaArquivo=null;iaTextoDoc=null;iaImagens=[];casaNivel="ler";montarCasa();};
   box.querySelectorAll("[data-fech]").forEach(b=>b.onclick=(ev)=>{
     ev.stopPropagation(); casaPeriodo=+b.dataset.fech; casaNivel="fechamento"; montarCasa(); });
@@ -1484,34 +1612,105 @@ function telaProvas(box){
 /* ── estudantes ─────────────────────────────────────────────────── */
 function telaAlunos(box){
   const t=turmaDe(casaTurma);
+  const ativos=(t.alunos||[]).filter(ativo), saidos=(t.alunos||[]).filter(a=>!ativo(a));
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(t.nome)}</button></div>
     <h2>Estudantes · ${esc(t.nome)}</h2>
-    <p class="sub">Um por linha. Aceita <b>07 Maria Silva</b>, <b>07;Maria Silva</b> ou só o nome
-      (numera na ordem). Colar de novo substitui a lista inteira.</p>
-    <textarea id="txAlunos" spellcheck="false" placeholder="01 ANA BEATRIZ DOS SANTOS
-02 BRUNO CARVALHO LIMA
-03 CARLA MENDES DA SILVA"></textarea>
+    <p class="sub">${ativos.length} matriculado${ativos.length===1?"":"s"}${
+      saidos.length?` · ${saidos.length} transferido${saidos.length===1?"":"s"}`:""}</p>
+    <div class="rot">Chegou um estudante novo</div>
+    <div class="duo"><input id="alNum" class="mono" placeholder="nº" inputmode="numeric">
+      <select id="alDesde">${periodosDe(t).map(n=>
+        `<option value="${n}">a partir do ${esc(nomePeriodo(t,n))}</option>`).join("")}</select></div>
+    <input id="alNome" placeholder="Nome completo" style="margin-top:9px">
+    <button class="btn sec" id="bAddAluno" style="margin-top:9px">Adicionar à turma</button>
+    <div class="rot">Turma atual</div>
+    <div id="alLista"></div>
+    <div class="rot">Substituir a lista inteira</div>
+    <p class="hint" style="margin-top:0">Um por linha: <b>07 Maria Silva</b>, <b>07;Maria Silva</b>
+      ou só o nome. Quem já tem notas nunca é apagado — vira transferido.</p>
+    <textarea id="txAlunos" spellcheck="false" style="margin-top:9px"></textarea>
     <div class="duo" style="margin-top:11px">
       <button class="btn sec" id="bArqAl">Importar arquivo</button>
-      <button class="btn" id="bSalvaAl">Salvar lista</button></div>
+      <button class="btn gho" id="bSalvaAl">Substituir lista</button></div>
     <input type="file" id="arqAl" accept=".json,.csv,.txt" hidden>
-    <p class="hint">O arquivo pode ser o <b>.json</b> de uma prova antiga, um <b>.csv</b> ou um
-      <b>.txt</b> com um estudante por linha.</p>`;
-  $("#txAlunos").value=t.alunos.map(a=>a.numero+" "+a.nome).join("\n");
+    <div id="alAviso"></div>`;
+  $("#txAlunos").value=ativos.map(a=>a.numero+" "+a.nome).join("\n");
+
+  const pintar=()=>{
+    const ordenados=[...ativos,...saidos];
+    $("#alLista").innerHTML=ordenados.length?ordenados.map(a=>{
+      const id=esc(a.numero);
+      const notas=temNotas(t,a);
+      return `<div class="item" style="cursor:default"><div class="cor">
+        <div class="t1" style="${ativo(a)?"":"opacity:.55;text-decoration:line-through"}">${esc(a.numero)} · ${esc(a.nome)}</div>
+        <div class="t2">${ativo(a)
+          ? (entrou(a)>1?"entrou no "+esc(nomePeriodo(t,entrou(a))):"desde o início")
+          : "transferido após o "+esc(nomePeriodo(t,saiu(a)))}${notas?" · tem notas":""}</div></div>
+        ${ativo(a)?`<button class="tag" data-sai="${id}">transferir</button>`
+                  :`<button class="tag" data-volta="${id}">reativar</button>`}
+        ${(!ativo(a)&&!notas)?`<button class="tag" data-del="${id}">apagar</button>`:""}</div>`;
+    }).join(""):'<p class="hint">Ninguém cadastrado ainda.</p>';
+    $("#alLista").querySelectorAll("[data-sai]").forEach(b=>b.onclick=()=>{
+      const a=t.alunos.find(x=>x.numero===b.dataset.sai);
+      const per=prompt("Transferido depois de qual período? (1 a "+calendario(t).qtd+")",
+        String(calendario(t).qtd));
+      const n=parseInt(per,10);
+      if(!(n>=1&&n<=calendario(t).qtd)) return;
+      a.ate=n; salvar(); telaAlunos(box); montarManual(); });
+    $("#alLista").querySelectorAll("[data-volta]").forEach(b=>b.onclick=()=>{
+      const a=t.alunos.find(x=>x.numero===b.dataset.volta);
+      a.ate=null; salvar(); telaAlunos(box); montarManual(); });
+    $("#alLista").querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{
+      if(!confirm("Apagar definitivamente este estudante?")) return;
+      t.alunos=t.alunos.filter(x=>x.numero!==b.dataset.del);
+      salvar(); telaAlunos(box); montarManual(); });
+  };
+  pintar();
+
   $("#mVolta").onclick=()=>{casaNivel="provas";montarCasa();};
+  $("#bAddAluno").onclick=()=>{
+    const nome=$("#alNome").value.trim().toUpperCase();
+    if(!nome){ alert("Digite o nome do estudante."); return; }
+    let num=$("#alNum").value.trim();
+    if(!num){ const usados=t.alunos.map(a=>parseInt(a.numero,10)||0);
+      num=String((usados.length?Math.max(...usados):0)+1); }
+    num=num.padStart(2,"0");
+    if(t.alunos.some(a=>a.numero===num)){ alert("Já existe o nº "+num+" nesta turma."); return; }
+    t.alunos.push({numero:num,nome,desde:parseInt($("#alDesde").value,10)||1,ate:null});
+    t.alunos.sort((a,b)=>ordNum(a.numero,b.numero));
+    salvar(); telaAlunos(box); montarManual(); pintarResultados(); };
+
   $("#bArqAl").onclick=()=>$("#arqAl").click();
   $("#arqAl").onchange=ev=>{
-    const f=ev.target.files[0]; if(!f) return;
+    const f=ev.target.files[0]; ev.target.value=""; if(!f) return;
     const r=new FileReader();
     r.onload=()=>{ $("#txAlunos").value=textoDeArquivo(r.result,f.name,t.nome); };
-    r.readAsText(f); ev.target.value="";
-  };
+    r.readAsText(f); };
+
   $("#bSalvaAl").onclick=()=>{
     const lista=lerListaAlunos($("#txAlunos").value);
     if(!lista.length){ alert("Não encontrei nenhum nome na lista."); return; }
-    t.alunos=lista; salvar(); alert(lista.length+" estudantes salvos na turma "+t.nome+".");
-    casaNivel="provas"; montarCasa(); montarManual(); pintarResultados(); pintarDesempenho();
-  };
+    const antigos=t.alunos||[];
+    const casa=(a)=>antigos.find(v=>v.numero===a.numero||v.nome===a.nome);
+    lista.forEach(a=>{ const v=casa(a);
+      if(v){ a.desde=entrou(v); a.ate=v.ate!=null?v.ate:null; }
+      else { a.desde=1; a.ate=null; } });
+    const sumidos=antigos.filter(v=>!lista.some(a=>a.numero===v.numero||a.nome===v.nome));
+    const comNotas=sumidos.filter(v=>temNotas(t,v));
+    const semNotas=sumidos.filter(v=>!temNotas(t,v));
+    if(comNotas.length && !confirm(
+        comNotas.length+" estudante(s) da lista antiga têm notas lançadas e sumiram da nova lista:\n\n"+
+        comNotas.map(v=>"  "+v.numero+" "+v.nome).join("\n")+
+        "\n\nEles serão MANTIDOS como transferidos, para não perder as notas. Continuar?")) return;
+    comNotas.forEach(v=>{ if(v.ate==null) v.ate=Math.max(1,calendario(t).qtd-1); });
+    t.alunos=[...lista,...comNotas].sort((a,b)=>ordNum(a.numero,b.numero));
+    salvar();
+    $("#alAviso").innerHTML=`<div class="diag" style="margin-top:11px"><b>Lista atualizada</b>
+      ${lista.length} matriculados${comNotas.length?` · ${comNotas.length} mantido(s) como transferido(s)`:""}${
+      semNotas.length?` · ${semNotas.length} removido(s)`:""}</div>`;
+    montarManual(); pintarResultados(); pintarDesempenho();
+    // só redesenha se ainda estivermos aqui — sair antes não pode ser desfeito
+    setTimeout(()=>{ if(casaNivel==="alunos"&&casaTurma===t.id) telaAlunos(box); },900); };
 }
 function textoDeArquivo(txt,nome,nomeTurma){
   if(/\.json$/i.test(nome)){
@@ -1537,7 +1736,7 @@ function lerListaAlunos(txt){
     if(!nome||/^\d+$/.test(nome)) return;
     if(!num) num=String(++auto).padStart(2,"0"); else num=num.padStart(2,"0");
     if(out.some(a=>a.numero===num)) num=String(out.length+1).padStart(2,"0");
-    out.push({numero:num,nome:nome.toUpperCase()});
+    out.push({numero:num,nome:nome.toUpperCase(),desde:1,ate:null});
   });
   return out.sort((a,b)=>ordNum(a.numero,b.numero));
 }
@@ -1547,12 +1746,13 @@ function telaNovaProva(box){
   const t=turmaDe(casaTurma);
   const F=casaForm||(casaForm={codigo:"",titulo:"",nq:10,no:5,gab:"",habs:"",po:10,pd:0,per:ultimoPeriodo});
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ ${esc(t.nome)}</button></div>
-    <h2>${F.vindoDeArquivo?"Confirmar a prova lida":"Nova prova"}</h2>
+    <h2>${F.substitui?"Substituir a prova":(F.vindoDeArquivo?"Confirmar a prova lida":"Nova prova")}</h2>
     <p class="sub">Turma ${esc(t.nome)} · ${esc(t.disciplina)}</p>
     ${F.vindoDeArquivo?`<div class="diag">Li <b>${F.nq}</b> questões com
       <b>${F.no}</b> alternativas${F.gab?` e o gabarito <b>${esc(F.gab)}</b>`:
       `. Não achei o gabarito no arquivo — digite abaixo`}.
-      Dê um código à prova e confirme; as questões já entram junto.</div>`:""}
+      ${F.substitui?"Confirme para substituir a prova antiga — código, período e pontuação foram mantidos."
+        :"Dê um código à prova e confirme; as questões já entram junto."}</div>`:""}
     <label>Código da prova</label>
     <input id="fCod" class="mono" placeholder="3A-AV2" value="${esc(F.codigo)}">
     <label>Título</label>
@@ -1578,7 +1778,11 @@ function telaNovaProva(box){
       placeholder="Conjuntos: operações
 Conjuntos: diagramas
 Volume do prisma">${esc(F.habs)}</textarea>
-    <button class="btn" id="fSalvar" style="margin-top:16px">Criar prova</button>
+    <button class="btn" id="fSalvar" style="margin-top:16px">${
+      F.substitui?"Substituir a prova":(F.vindoDeArquivo?"Confirmar e criar":"Criar prova")}</button>
+    ${F.vindoDeArquivo?`<div class="duo" style="margin-top:9px">
+      <button class="btn gho" id="fOutro">Usar outro arquivo</button>
+      <button class="btn gho" id="fDescartar">Descartar</button></div>`:""}
     <p class="hint">O gabarito canônico é o da prova <b>na ordem original</b>. Como cada aluno
       recebe as questões embaralhadas, o app calcula o gabarito individual sozinho, a partir
       da turma e do número.</p>`;
@@ -1603,7 +1807,17 @@ Volume do prisma">${esc(F.habs)}</textarea>
   ["fCod","fTit","fNq","fNo","fGab","fHab","fPo","fPd","fPer"].forEach(id=>{
     const el=$("#"+id); el.oninput=sinc; el.onchange=sinc; });
   sinc();
-  $("#mVolta").onclick=()=>{casaNivel="provas";montarCasa();};
+  $("#mVolta").onclick=()=>{ if(F.vindoDeArquivo) descartarLeitura();
+    const volta=F.substitui; substituindo=null; casaForm=null;
+    if(volta){ casaProva=volta; casaNivel="prova"; } else casaNivel="provas";
+    montarCasa(); };
+  if($("#fOutro")) $("#fOutro").onclick=()=>{
+    descartarLeitura(); casaForm=null; casaProva=null; casaNivel="ler"; montarCasa(); };
+  if($("#fDescartar")) $("#fDescartar").onclick=()=>{
+    if(!confirm(F.substitui?"Descartar e manter a prova atual como está?":"Descartar a prova lida do arquivo?")) return;
+    const volta=F.substitui; descartarLeitura(); substituindo=null; casaForm=null;
+    if(volta){ casaProva=volta; casaNivel="prova"; } else casaNivel="provas";
+    montarCasa(); };
   $("#fSalvar").onclick=()=>{
     sinc();
     if(F.gab.length!==F.nq){ alert("O gabarito precisa ter exatamente "+F.nq+" letras. Faltam "+(F.nq-F.gab.length)+"."); return; }
@@ -1616,7 +1830,21 @@ Volume do prisma">${esc(F.habs)}</textarea>
       const lidas=lerQuestoes(iaTexto);
       p.questoes=lidas.questoes.slice(0,p.nq).map(q=>({enunciado:q.enunciado,
         alternativas:(q.alternativas||[]).slice(0,p.no),correta:q.correta,imagem:null}));
-      iaTexto=null;
+      descartarLeitura();
+    }
+    if(F.substitui){
+      const velha=provaDe(F.substitui);
+      if(velha){
+        E.res=E.res.filter(r=>r.prova!==velha.id);      // cartões antigos não valem mais
+        Object.assign(velha,{nq:p.nq,no:p.no,gabC:p.gabC,habs:p.habs,
+          pontosObj:p.pontosObj,pontosDisc:p.pontosDisc,periodo:p.periodo,
+          codigo:p.codigo,titulo:p.titulo,questoes:p.questoes,discursivas:[]});
+        substituindo=null; casaForm=null; ativar(velha.id);
+        casaProva=velha.id; casaNivel="prova"; montarCasa();
+        alert("Prova substituída. Gere as provas e os cartões novamente antes de aplicar.");
+        return;
+      }
+      substituindo=null;
     }
     E.provas.push(p); ultimoPeriodo=p.periodo; casaForm=null; ativar(p.id);
     casaProva=p.id; casaNivel="prova"; montarCasa();
@@ -1742,7 +1970,7 @@ function aplicarQR(p){
 
   const tu=turmaDe(pr.turma);
   if(tu&&numero&&!tu.alunos.some(a=>a.numero===numero)){
-    tu.alunos.push({numero,nome}); tu.alunos.sort((a,b)=>ordNum(a.numero,b.numero)); }
+    tu.alunos.push({numero,nome,desde:1,ate:null}); tu.alunos.sort((a,b)=>ordNum(a.numero,b.numero)); }
 
   alunoQR={turma:tu?tu.nome:turma,numero,nome,gab:g};
   salvar(); montarManual();
@@ -1849,9 +2077,12 @@ function montarManual(){
   const box=$("#manPasso"), p=provaAtiva(), t=turmaAtiva();
   if(!p||!t){ box.innerHTML='<div class="vazio"><b>Nenhuma prova selecionada</b>Escolha a turma e a prova na aba Turmas.</div>'; return; }
   if(!t.alunos.length){ box.innerHTML=`<div class="vazio"><b>Turma ${esc(t.nome)} sem estudantes</b>Cadastre a lista em Turmas › ${esc(t.nome)} › Estudantes.</div>`; return; }
+  const daVez=alunosEm(t,p.periodo||1);
+  if(!daVez.length){ box.innerHTML=`<div class="vazio"><b>Ninguém matriculado neste período</b>
+    Confira as datas de entrada e saída em Turmas › ${esc(t.nome)} › Estudantes.</div>`; return; }
   if(!manAluno){
     box.innerHTML=`<div class="rot">Escolha o estudante — ${esc(t.nome)} · ${esc(p.codigo)}</div>`+
-      t.alunos.map(a=>{
+      daVez.map(a=>{
         const j=E.res.find(x=>x.prova===p.id&&x.numero===a.numero);
         return `<button class="aluno" data-n="${esc(a.numero)}"><div style="flex:1;min-width:0">
           <div class="nm">${esc(a.nome)}</div>
@@ -1865,7 +2096,7 @@ function montarManual(){
       manDisc=j?(j.notaDisc||0):0;
       montarManual(); });
     return; }
-  const al=t.alunos.find(a=>a.numero===manAluno);
+  const al=t.alunos.find(a=>a.numero===manAluno)||{nome:"—",numero:manAluno};
   const gab=gabaritoDe(t.nome,manAluno);
   box.innerHTML=`<button class="btn gho" id="bVolta2" style="margin-bottom:12px">‹ Trocar estudante</button>
     <div class="card"><h3>${esc(al.nome)}</h3><p>${esc(t.nome)} · nº ${esc(manAluno)} · ${esc(p.codigo)}</p></div>
