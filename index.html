@@ -248,6 +248,7 @@ textarea{min-height:132px;resize:vertical;font-family:var(--mono);font-size:12.5
 <section id="v-res" class="view">
   <h2>Resultados</h2>
   <p class="sub" id="resSub"></p>
+  <div id="resSel"></div>
   <div id="resLista"></div>
   <div class="linha" style="margin-top:18px" id="resAcoes" hidden>
     <button class="btn sec" id="bCsv">Baixar CSV</button>
@@ -258,6 +259,7 @@ textarea{min-height:132px;resize:vertical;font-family:var(--mono);font-size:12.5
 <section id="v-des" class="view">
   <h2>Análise da turma</h2>
   <p class="sub" id="desSub"></p>
+  <div id="desSel"></div>
   <div id="desCorpo"></div>
 </section>
 
@@ -2550,8 +2552,54 @@ function montarManual(){
 }
 
 /* ═════════ 9. RESULTADOS ═════════ */
+
+/* Trocar de turma sem sair da aba. Antes era preciso ir até Turmas,
+   entrar na turma, abrir a prova e voltar — e as notas eram sempre
+   as da última prova aberta. */
+const seletorAberto={};
+
+function pintarSeletor(idCaixa, aoTrocar){
+  const caixa=$("#"+idCaixa); if(!caixa) return;
+  const atual=provaAtiva(), tAtual=turmaAtiva();
+  if(!E.provas.length){ caixa.innerHTML=""; return; }
+  const aberto=!!seletorAberto[idCaixa];
+
+  let h=`<button class="item" id="${idCaixa}Btn" style="margin-bottom:10px">
+    <div class="cor">
+      <div class="t1">${atual?esc(tAtual.nome)+" · "+esc(atual.codigo):"Escolher prova"}</div>
+      <div class="t2">${atual?esc(atual.titulo||nomePeriodo(tAtual,atual.periodo||1)):"Nenhuma prova selecionada"}</div>
+    </div><span class="ch">${aberto?"⌃":"⌄"}</span></button>`;
+
+  if(aberto){
+    h+=`<div style="margin:-4px 0 12px">`;
+    E.escolas.forEach(e=>{
+      const turmas=E.turmas.filter(x=>x.escola===e.id && provasDaTurma(x.id).length);
+      if(!turmas.length) return;
+      h+=`<div class="rot" style="margin:10px 0 6px">${esc(e.curto)}</div>`;
+      turmas.forEach(t=>{
+        provasDaTurma(t.id).forEach(pr=>{
+          const n=resDa(pr.id).length, tot=alunosEm(t,pr.periodo||1).length;
+          h+=`<button class="item ${pr.id===E.ativa?"sel":""}" data-sel="${pr.id}"
+            style="padding:10px 12px;margin-bottom:5px">
+            <div class="cor"><div class="t1" style="font-size:13.5px">${esc(t.nome)} · ${esc(pr.codigo)}</div>
+            <div class="t2">${esc(nomePeriodo(t,pr.periodo||1))} · ${n}${tot?" de "+tot:""} corrigidos</div></div>
+            <span class="ch">›</span></button>`;
+        });
+      });
+    });
+    h+=`</div>`;
+  }
+  caixa.innerHTML=h;
+  $("#"+idCaixa+"Btn").onclick=()=>{
+    seletorAberto[idCaixa]=!seletorAberto[idCaixa]; pintarSeletor(idCaixa, aoTrocar); };
+  caixa.querySelectorAll("[data-sel]").forEach(b=>b.onclick=()=>{
+    seletorAberto[idCaixa]=false;
+    ativar(b.dataset.sel);
+    if(aoTrocar) aoTrocar(); });
+}
 function pintarResultados(){
   const p=provaAtiva(), t=turmaAtiva();
+  pintarSeletor("resSel", ()=>pintarResultados());
   if(!p){ $("#pill").hidden=true; $("#resAcoes").hidden=true; $("#resSub").textContent="";
     $("#resLista").innerHTML='<div class="vazio"><b>Nenhuma prova selecionada</b>Escolha a turma e a prova na aba Turmas.</div>'; return; }
 
@@ -2679,6 +2727,7 @@ function diagnostico(s){
 }
 function pintarDesempenho(){
   const p=provaAtiva(), t=turmaAtiva();
+  pintarSeletor("desSel", ()=>pintarDesempenho());
   if(!p){ $("#desSub").textContent="";
     $("#desCorpo").innerHTML='<div class="vazio"><b>Nenhuma prova selecionada</b>Escolha a turma e a prova na aba Turmas.</div>'; return; }
   const A=resDa(p.id), s=estat(A);
@@ -2809,7 +2858,12 @@ function irPara(v){
 }
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>irPara(b.dataset.v));
 $("#bIniciar").onclick=iniciar; $("#bParar").onclick=parar;
-$("#bTrocar").onclick=()=>{ casaNivel="turmas"; irPara("casa"); };
+$("#bTrocar").onclick=()=>{
+  const aba=[...document.querySelectorAll("nav button")].find(b=>b.classList.contains("on"));
+  const v=aba?aba.dataset.v:"casa";
+  if(v==="res"){ seletorAberto.resSel=true; pintarResultados(); return; }
+  if(v==="des"){ seletorAberto.desSel=true; pintarDesempenho(); return; }
+  casaNivel="turmas"; irPara("casa"); };
 
 (function conferirPecas(){
   const faltando=[];
