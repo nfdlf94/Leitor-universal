@@ -1,21 +1,15 @@
 /* sw.js — faz o app abrir sem internet.
    Desbugando a Matemática · correção de provas
 
-   Guarda todos os arquivos no aparelho na primeira visita. Depois disso
-   o app abre offline, e os dados (turmas, provas, notas) já eram locais
-   desde sempre — ficam no armazenamento do navegador, não em servidor.
-
-   AO PUBLICAR UMA VERSÃO NOVA: troque o número em VERSAO. É isso que
-   avisa o celular de que há atualização; sem trocar, ele continua
-   servindo a versão guardada. */
-const VERSAO = "v2";
+   AO PUBLICAR UMA VERSÃO NOVA: troque o número em VERSAO. */
+const VERSAO = "v3";
 const CACHE = "dbm-omr-" + VERSAO;
 
-/* Tudo que o app precisa para funcionar sozinho. */
-const ARQUIVOS = [
+/* O que o app precisa para ABRIR e corrigir provas. A instalação só
+   termina quando tudo isto estiver guardado. */
+const ESSENCIAIS = [
   "./",
   "./index.html",
-  "./manifest.webmanifest",
   "./layout.js",
   "./embaralho.js",
   "./gerador.js",
@@ -23,9 +17,15 @@ const ARQUIVOS = [
   "./jsqr.js",
   "./jspdf.umd.min.js",
   "./qrcode.min.js",
-  "./mammoth.browser.min.js",
+  "./manifest.webmanifest"
+];
+
+/* Peso pesado: só é preciso para LER prova de arquivo. Baixa depois,
+   em segundo plano, para não atrasar (nem derrubar) a instalação. */
+const EXTRAS = [
   "./pdf.min.js",
   "./pdf.worker.min.js",
+  "./mammoth.browser.min.js",
   "./standard_fonts/LiberationSans-Regular.ttf",
   "./standard_fonts/LiberationSans-Bold.ttf",
   "./standard_fonts/LiberationSans-Italic.ttf",
@@ -41,9 +41,20 @@ const ARQUIVOS = [
   "./standard_fonts/FoxitSymbol.pfb",
   "./standard_fonts/FoxitDingbats.pfb"
 ];
+const ARQUIVOS = ESSENCIAIS.concat(EXTRAS);
 
-/* Guarda um arquivo, tentando de novo antes de desistir. Devolve
-   true/false para sabermos exatamente o que ficou de fora. */
+/* Casar pedido com cópia guardada IGNORANDO o cabeçalho Vary. O GitHub
+   Pages responde com "Vary: Accept-Encoding", e sem isto o navegador
+   considera que a cópia não serve — era por aqui que a abertura a frio
+   falhava, mesmo com o arquivo guardado. */
+const OPCOES = {ignoreVary: true};
+
+async function pegar(url) {
+  const cache = await caches.open(CACHE);
+  return (await cache.match(url, OPCOES)) ||
+         (await cache.match(url, {ignoreVary: true, ignoreSearch: true}));
+}
+
 async function guardar(cache, url, tentativas) {
   for (let i = 0; i < (tentativas || 2); i++) {
     try {
@@ -51,7 +62,7 @@ async function guardar(cache, url, tentativas) {
       if (resp && resp.ok) { await cache.put(url, resp.clone()); return true; }
     } catch (e) { /* tenta de novo */ }
   }
-  console.warn("[sw] não consegui guardar", url);
+  console.warn("[sw] nao consegui guardar", url);
   return false;
 }
 
@@ -59,32 +70,15 @@ self.addEventListener("install", ev => {
   ev.waitUntil((async () => {
     const cache = await caches.open(CACHE);
     const falhas = [];
-    /* Em série: baixar 27 arquivos de uma vez satura a rede do celular
-       e é justamente aí que os maiores (o worker de 1 MB) falhavam. */
-    for (const url of ARQUIVOS) {
-      const ok = await guardar(cache, url);
-      if (!ok) falhas.push(url);
+    for (const url of ESSENCIAIS) {
+      if (!await guardar(cache, url, 3)) falhas.push(url);
     }
-    await self.clients.claim();
-    avisarClientes({tipo: "instalado", falhas});
+    /* Assume o controle já nesta visita: sem isto, a primeira abertura
+       offline acontece antes de o worker estar no comando. */
+    await self.skipWaiting();
+    if (falhas.length) console.warn("[sw] essenciais que faltaram:", falhas);
   })());
 });
-
-async function avisarClientes(msg) {
-  const cs = await self.clients.matchAll({includeUncontrolled: true});
-  cs.forEach(c => c.postMessage(msg));
-}
-
-/* Responde ao app quais arquivos estão realmente guardados. */
-async function conferir() {
-  const cache = await caches.open(CACHE);
-  const faltando = [];
-  for (const url of ARQUIVOS) {
-    const m = await cache.match(url);
-    if (!m) faltando.push(url);
-  }
-  return {total: ARQUIVOS.length, faltando, versao: VERSAO};
-}
 
 self.addEventListener("activate", ev => {
   ev.waitUntil((async () => {
@@ -92,32 +86,48 @@ self.addEventListener("activate", ev => {
     await Promise.all(nomes.filter(n => n.startsWith("dbm-omr-") && n !== CACHE)
       .map(n => caches.delete(n)));
     await self.clients.claim();
+    baixarExtras();               // segue baixando o resto em segundo plano
   })());
 });
+
+async function baixarExtras() {
+  const cache = await caches.open(CACHE);
+  const falhas = [];
+  for (const url of EXTRAS) {
+    if (await cache.match(url, OPCOES)) continue;
+    if (!await guardar(cache, url, 2)) falhas.push(url);
+  }
+  avisarClientes({tipo: "extras", falhas: falhas});
+}
+
+async function avisarClientes(msg) {
+  const cs = await self.clients.matchAll({includeUncontrolled: true});
+  cs.forEach(c => c.postMessage(msg));
+}
+
+async function conferir() {
+  const cache = await caches.open(CACHE);
+  const faltando = [];
+  for (const url of ARQUIVOS) {
+    const m = await cache.match(url, OPCOES);
+    if (!m) faltando.push(url);
+  }
+  return {total: ARQUIVOS.length, faltando: faltando, versao: VERSAO};
+}
 
 self.addEventListener("message", ev => {
   if (ev.data === "assumir") return self.skipWaiting();
 
-  if (ev.data === "conferir") {
+  if (ev.data === "conferir" || ev.data === "completar") {
     ev.waitUntil((async () => {
-      const r = await conferir();
-      (ev.source ? [ev.source] : await self.clients.matchAll())
-        .forEach(c => c.postMessage({tipo: "conferencia", ...r}));
-    })());
-  }
-
-  if (ev.data === "completar") {
-    ev.waitUntil((async () => {
-      const cache = await caches.open(CACHE);
-      const {faltando} = await conferir();
-      const restam = [];
-      for (const url of faltando) {
-        const ok = await guardar(cache, url, 3);
-        if (!ok) restam.push(url);
+      if (ev.data === "completar") {
+        const cache = await caches.open(CACHE);
+        const pendentes = (await conferir()).faltando;
+        for (const url of pendentes) await guardar(cache, url, 3);
       }
       const r = await conferir();
-      (ev.source ? [ev.source] : await self.clients.matchAll())
-        .forEach(c => c.postMessage({tipo: "conferencia", ...r, completou: true}));
+      const alvos = ev.source ? [ev.source] : await self.clients.matchAll();
+      alvos.forEach(c => c.postMessage(Object.assign({tipo: "conferencia"}, r)));
     })());
   }
 });
@@ -125,47 +135,63 @@ self.addEventListener("message", ev => {
 self.addEventListener("fetch", ev => {
   const req = ev.request;
   if (req.method !== "GET") return;
-
   const url = new URL(req.url);
 
-  /* A chamada à API da Claude nunca é guardada: precisa de rede e a
-     resposta muda a cada prova. Offline, ela falha e o app avisa. */
+  /* A API da Claude nunca é guardada: precisa de rede de qualquer jeito. */
   if (url.hostname === "api.anthropic.com") return;
 
-  /* Fontes do Google: guarda na primeira vez que carregarem, para o
-     app não ficar sem tipografia quando estiver sem rede. */
-  const externa = url.origin !== self.location.origin;
+  /* ABERTURA DA PÁGINA — o caso que estava quebrando a frio.
+     Tenta a rede; sem rede, entrega o index guardado. */
+  if (req.mode === "navigate") {
+    ev.respondWith((async () => {
+      try {
+        const rede = await fetch(req);
+        if (rede && rede.ok) {
+          const cache = await caches.open(CACHE);
+          cache.put("./index.html", rede.clone()).catch(() => {});
+          return rede;
+        }
+      } catch (e) { /* offline: segue para o cache */ }
 
+      const guardado = (await pegar("./index.html")) || (await pegar("./"));
+      if (guardado) return guardado;
+
+      return new Response(
+        '<!doctype html><meta charset="utf-8">' +
+        '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+        '<body style="background:#071324;color:#E8ECF3;font-family:system-ui;padding:28px;line-height:1.6">' +
+        '<h2 style="color:#F97316">App ainda nao guardado</h2>' +
+        '<p>Este aparelho nao chegou a baixar o aplicativo por completo.</p>' +
+        '<p>Conecte-se a internet e abra esta pagina uma vez. Depois disso ' +
+        'ela passa a funcionar sem conexao.</p></body>',
+        {headers: {"Content-Type": "text/html; charset=utf-8"}});
+    })());
+    return;
+  }
+
+  /* Demais arquivos: primeiro o que está no aparelho. */
   ev.respondWith((async () => {
-    const cache = await caches.open(CACHE);
-    const guardado = await cache.match(req, {ignoreSearch: false});
-
-    if (guardado) {
-      /* Serve do aparelho e, se houver rede, atualiza em segundo plano. */
-      atualizarDepois(cache, req);
-      return guardado;
-    }
-
+    const guardado = await pegar(req.url);
+    if (guardado) { atualizarDepois(req); return guardado; }
     try {
       const resp = await fetch(req);
-      if (resp && (resp.ok || resp.type === "opaque")) {
-        cache.put(req, resp.clone()).catch(() => {});
+      if (resp && resp.ok && url.origin === self.location.origin) {
+        const cache = await caches.open(CACHE);
+        cache.put(req.url, resp.clone()).catch(() => {});
       }
       return resp;
     } catch (e) {
-      /* Sem rede e sem cópia guardada. Se for navegação, devolve o app. */
-      if (req.mode === "navigate") {
-        const raiz = await cache.match("./index.html");
-        if (raiz) return raiz;
-      }
-      if (externa) return new Response("", {status: 504});
+      if (url.origin !== self.location.origin) return new Response("", {status: 504});
       throw e;
     }
   })());
 });
 
-function atualizarDepois(cache, req) {
-  fetch(req).then(resp => {
-    if (resp && resp.ok) cache.put(req, resp.clone()).catch(() => {});
+function atualizarDepois(req) {
+  fetch(req).then(async resp => {
+    if (resp && resp.ok) {
+      const cache = await caches.open(CACHE);
+      cache.put(req.url, resp.clone()).catch(() => {});
+    }
   }).catch(() => {});
 }

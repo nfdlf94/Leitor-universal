@@ -1557,7 +1557,10 @@ function montarOffline(){
     c.innerHTML=`<div class="diag"><b>Tudo guardado</b>${r.total} arquivos no aparelho
       (${esc(r.versao||"")}). O app abre e funciona sem internet.</div>`;
     return; }
+  const abre=!r.faltando.some(f=>/index\.html|layout|embaralho|gerador|fonte\.js|jsqr|jspdf|qrcode|\.\/$/.test(f));
   c.innerHTML=`<div class="aviso"><b>${r.faltando.length} de ${r.total} não foram guardados</b>
+    ${abre?"O app <b>abre</b> sem internet; o que falta afeta só a leitura de prova por arquivo."
+          :"Faltam peças essenciais — o app pode não abrir sem internet."}<br><br>
     ${r.faltando.map(f=>esc(f.replace("./",""))).join(", ")}<br><br>
     ${navigator.onLine?"Toque em verificar de novo para baixar o que falta."
       :"Conecte-se à internet e toque em verificar."}</div>`;
@@ -1577,10 +1580,11 @@ if("serviceWorker" in navigator){
   navigator.serviceWorker.addEventListener("message", ev=>{
     const d=ev.data||{};
     if(d.tipo==="conferencia"){ ultimaConferencia=d; montarOffline(); }
-    if(d.tipo==="instalado" && d.falhas && d.falhas.length){
-      console.warn("[sw] ficaram de fora:", d.falhas);
-      avisoFlutuante('<b>App guardado pela metade</b>'+d.falhas.length+
-        ' arquivo(s) não foram baixados. Abra Configurações › Verificar uso offline.',"aviso",8);
+    if(d.tipo==="extras" && d.falhas && d.falhas.length){
+      console.warn("[sw] extras que faltaram:", d.falhas);
+      avisoFlutuante('<b>Uso offline incompleto</b>'+d.falhas.length+
+        ' arquivo(s) não foram baixados. O app abre sem internet, mas ler prova '+
+        'de PDF ou Word pode falhar. Configurações › Verificar uso offline.',"aviso",9);
     }
   });
 }
@@ -3116,6 +3120,12 @@ function avisoFlutuante(texto, cls, segundos){
         });
       });
     }).catch(e=>console.warn("service worker não registrou",e));
+  });
+
+  let jaTrocou=false;
+  navigator.serviceWorker.addEventListener("controllerchange", ()=>{
+    if(jaTrocou) return; jaTrocou=true;
+    avisoFlutuante('<b>App atualizado</b>Guardando a versão nova no aparelho.',"diag",4);
   });
 
   const mostrarRede=()=>{
