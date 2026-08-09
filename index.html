@@ -818,7 +818,8 @@ Regras:
 
 let iaArquivo=null;    // {nome, tipo, b64} — foto ou PDF, vai inteiro para a IA
 let iaTextoDoc=null;   // texto extraído de um .docx, aqui mesmo no aparelho
-let iaImagens=[];      // figuras achadas no .docx, para anexar às questões
+let iaImagens=[];      // figuras achadas no arquivo, para anexar às questões
+let iaPaginasPdf=null; // páginas do PDF, para casar cada gráfico com sua questão
 
 function telaLerArquivo(box){
   const p=casaProva?provaDe(casaProva):null;    // sem prova = está criando uma
@@ -883,19 +884,24 @@ function telaLerArquivo(box){
 
 /* Extrai o texto de um PDF no próprio aparelho, preservando as linhas.
    Serve tanto para a prova quanto para a lista de estudantes. */
-async function textoDePdf(arquivo){
+async function abrirPdf(arquivo){
   if(typeof pdfjsLib==="undefined") throw new Error("faltou o arquivo pdf.min.js");
   pdfjsLib.GlobalWorkerOptions.workerSrc="pdf.worker.min.js";
   const dados=new Uint8Array(await arquivo.arrayBuffer());
-  /* Sem o pdf.worker.min.js no servidor, a leitura fica esperando para
-     sempre e a tela trava sem explicação. O limite converte isso em erro. */
   const limite=new Promise((_,rej)=>setTimeout(()=>rej(new Error(
     "a leitura do PDF não respondeu — confira se o arquivo pdf.worker.min.js "+
     "foi enviado junto com o app")),25000));
-  const doc=await Promise.race([pdfjsLib.getDocument({data:dados}).promise,limite]);
+  return await Promise.race([pdfjsLib.getDocument({data:dados}).promise,limite]);
+}
+
+/* Texto e imagens, página a página. Guardar a página de cada linha é o
+   que permite depois casar cada gráfico com a questão certa. */
+async function conteudoDePdf(arquivo){
+  const doc=await abrirPdf(arquivo);
   const paginas=[];
   for(let i=1;i<=doc.numPages;i++){
-    const pg=await doc.getPage(i), c=await pg.getTextContent();
+    const pg=await doc.getPage(i);
+    const c=await pg.getTextContent();
     let y=null, linha=[]; const linhas=[];
     c.items.forEach(it=>{
       const yy=Math.round(it.transform[5]);
@@ -903,10 +909,69 @@ async function textoDePdf(arquivo){
       y=yy; linha.push(it.str);
     });
     if(linha.length) linhas.push(linha.join("").trim());
-    paginas.push(linhas.filter(l=>l).join("\n"));
+    paginas.push({linhas:linhas.filter(l=>l), imagens:await imagensDaPagina(pg)});
   }
-  return paginas.join("\n");
+  return paginas;
 }
+
+async function imagensDaPagina(pg){
+  const saida=[];
+  try{
+    const ops=await pg.getOperatorList();
+    const nomes=[];
+    ops.fnArray.forEach((fn,k)=>{
+      if(fn===pdfjsLib.OPS.paintImageXObject || fn===pdfjsLib.OPS.paintJpegXObject)
+        nomes.push(ops.argsArray[k][0]);
+    });
+    for(const nome of nomes){
+      const obj=await new Promise(r=>{ try{ pg.objs.get(nome,r); }catch(e){ r(null); } });
+      const url=imagemParaDataUrl(obj);
+      if(url) saida.push(url);
+    }
+  }catch(e){ console.warn("imagens do PDF não puderam ser lidas",e); }
+  return saida;
+}
+
+/* pdf.js devolve os pixels crus; o canvas converte em JPEG utilizável. */
+function imagemParaDataUrl(obj){
+  if(!obj || !obj.width || !obj.height) return null;
+  const {width:w, height:h, data, kind}=obj;
+  const c=document.createElement("canvas"); c.width=w; c.height=h;
+  const cx=c.getContext("2d");
+  const img=cx.createImageData(w,h);
+  try{
+    if(kind===3 || (data && data.length===w*h*4)){ img.data.set(data); }
+    else if(kind===2 || (data && data.length===w*h*3)){
+      for(let i=0,j=0;i<w*h;i++,j+=3){
+        img.data[i*4]=data[j]; img.data[i*4+1]=data[j+1];
+        img.data[i*4+2]=data[j+2]; img.data[i*4+3]=255;
+      }
+    } else if(data && data.length===w*h){
+      for(let i=0;i<w*h;i++){
+        img.data[i*4]=img.data[i*4+1]=img.data[i*4+2]=data[i]; img.data[i*4+3]=255;
+      }
+    } else return null;
+  }catch(e){ return null; }
+  cx.putImageData(img,0,0);
+  // fundo branco: gráficos costumam vir com transparência
+  const f=document.createElement("canvas"); f.width=w; f.height=h;
+  const fx=f.getContext("2d");
+  fx.fillStyle="#ffffff"; fx.fillRect(0,0,w,h); fx.drawImage(c,0,0);
+  const lado=Math.max(w,h), esc=Math.min(1,900/lado);
+  if(esc<1){
+    const r=document.createElement("canvas");
+    r.width=Math.round(w*esc); r.height=Math.round(h*esc);
+    r.getContext("2d").drawImage(f,0,0,r.width,r.height);
+    return {dados:r.toDataURL("image/jpeg",0.78), w:r.width, h:r.height};
+  }
+  return {dados:f.toDataURL("image/jpeg",0.78), w, h};
+}
+
+async function textoDePdf(arquivo){
+  const pags=await conteudoDePdf(arquivo);
+  return pags.map(p=>p.linhas.join("\n")).join("\n");
+}
+
 async function textoDeDocx(arquivo){
   if(typeof mammoth==="undefined") throw new Error("faltou o arquivo mammoth.browser.min.js");
   const buf=await arquivo.arrayBuffer();
@@ -935,24 +1000,52 @@ async function lerDocx(f,p){
   }
 }
 
+/* Cada gráfico pertence à questão que fala em gráfico/figura naquela
+   página. Se nenhuma falar, vai para a primeira questão da página. */
+function casarFiguras(questoes, paginas){
+  const fala=/gr[áa]fico|plano cartesiano|figura|imagem|esquema|abaixo representa/i;
+  paginas.forEach((pg, idx) => {
+    if(!pg.imagens || !pg.imagens.length) return;
+    const daPagina=questoes.filter(q=>q.pagina===idx);
+    if(!daPagina.length) return;
+    let candidatas=daPagina.filter(q=>fala.test(q.enunciado));
+    if(!candidatas.length) candidatas=[daPagina[0]];
+    pg.imagens.forEach((img,k)=>{
+      const alvo=candidatas[Math.min(k,candidatas.length-1)];
+      if(alvo && !alvo.imagem) alvo.imagem=img;
+    });
+  });
+  return questoes;
+}
+
+function textoComPaginas(paginas){
+  return paginas.map((p,i)=>MARCA_PAG+i+"\n"+p.linhas.join("\n")).join("\n");
+}
+
 /* PDF de texto (como os gerados por computador) também pode ser lido de
    graça aqui. PDF que é só imagem escaneada não devolve texto — aí a IA
    ou o chat continuam sendo o caminho. */
 async function lerPdfProva(f,p){
   const info=t=>{ const el=$("#iaInfo"); if(el) el.innerHTML=t; };
   try{
-    const txt=await textoDePdf(f);
-    const util=txt.split(/\r?\n/).filter(l=>l.trim()).length;
+    const brutas=await conteudoDePdf(f);
+    const pags=limparRuidoProva(brutas);
+    const util=pags.reduce((n,x)=>n+x.linhas.length,0);
+    const nImgs=pags.reduce((n,x)=>n+(x.imagens?x.imagens.length:0),0);
     if(util<3){
       info(`<div class="diag" style="margin-top:10px"><b>${esc(f.name)}</b>
         PDF sem texto — parece digitalizado. Use a leitura pela Claude abaixo.</div>`);
       return; }
-    iaTextoDoc=txt; iaImagens=[];
+    iaTextoDoc=textoComPaginas(pags);
+    iaPaginasPdf=pags;
+    iaImagens=pags.reduce((a,x)=>a.concat(x.imagens||[]),[]).map(im=>im.dados);
     info(`<div class="diag" style="margin-top:10px"><b>${esc(f.name)}</b>
-      ${util} linhas de texto · lido no próprio aparelho</div>`);
+      ${util} linhas de texto${nImgs?" e "+nImgs+" gráfico"+(nImgs===1?"":"s"):""}
+      · lido no próprio aparelho</div>`);
     pintarPreDoc(p);
   }catch(e){
     console.warn("PDF sem texto extraível",e);
+    info(`<div class="aviso" style="margin-top:10px">Não consegui ler o PDF: ${esc(e.message)}</div>`);
   }
 }
 
@@ -978,6 +1071,8 @@ function pintarPreDoc(p){
   // entrega o texto JÁ normalizado: o que aparece no editor é o que será salvo
   $("#bDireto").onclick=()=>{
     const achadas=lerQuestoes(iaTextoDoc);
+    if(iaPaginasPdf) casarFiguras(achadas.questoes, iaPaginasPdf);
+    iaFiguradas=achadas.questoes.map(q=>q.imagem||null);
     const no=p?p.no:Math.max(4,Math.min(5,
       achadas.questoes.reduce((m,q)=>Math.max(m,(q.alternativas||[]).length),5)));
     entregarLeitura(questoesParaTexto(achadas.questoes)||iaTextoDoc, p, no); };
@@ -1007,10 +1102,12 @@ function aplicarJson(txt,p){
     $("#iaErro").innerHTML=`<div class="aviso" style="margin-top:10px">Não consegui usar: ${esc(e.message)}</div>`;
   }
 }
+let iaFiguradas=null;  // figura de cada questão, na ordem lida
 let iaTexto=null;      // texto vindo da leitura
 let iaTextoPara=null;  // para QUAL prova ele foi lido ("novo" = cadastro em criação)
 function descartarLeitura(){
-  iaTexto=null; iaTextoPara=null; iaArquivo=null; iaTextoDoc=null; iaImagens=[];
+  iaTexto=null; iaTextoPara=null; iaArquivo=null; iaTextoDoc=null;
+  iaImagens=[]; iaPaginasPdf=null;
 }
 
 const alternativasDe=d=>{
@@ -1454,6 +1551,51 @@ function telaProva(box){
 }
 
 /* ── questões: aceita o formato que o professor já digita ────────── */
+/* Cabeçalho e rodapé se repetem em todas as páginas; linhas de
+   habilidade e numeração de página não fazem parte da questão. */
+function limparRuidoProva(paginas){
+  /* Só as bordas da página podem ser cabeçalho ou rodapé. Olhar o miolo
+     apagaria alternativas parecidas entre si — "A) f(x) = 3x + 6" e
+     "A) f(x) = 5x + 4" viram a mesma coisa depois de trocar os números. */
+  const BORDA=2;
+  const conta={};
+  paginas.forEach(p=>{
+    const bordas=[...p.linhas.slice(0,BORDA), ...p.linhas.slice(-BORDA)];
+    new Set(bordas).forEach(l=>{
+      const chave=l.replace(/\d+/g,"#").trim();
+      conta[chave]=(conta[chave]||0)+1;
+    });
+  });
+  const minimo=Math.max(2,Math.ceil(paginas.length*0.6));
+  const repetida=(l,i,total)=>{
+    if(i>=BORDA && i<total-BORDA) return false;
+    const chave=l.replace(/\d+/g,"#").trim();
+    return chave.length>12 && conta[chave]>=minimo;
+  };
+  const lixo=[
+    /^\s*habilidade\b/i,
+    /^\s*p[áa]gina\s*\d+\s*$/i,
+    /^\s*\d+\s*$/,
+    /^\s*coment[áa]rios?\s+das\s+respostas/i
+  ];
+  return paginas.map(p=>({
+    imagens:p.imagens,
+    linhas:p.linhas.filter((l,i,arr)=>{
+      if(repetida(l,i,arr.length)) return false;
+      return !lixo.some(re=>re.test(l));
+    })
+  }));
+}
+
+/* Linhas de tabela (muitos números soltos) precisam continuar em
+   linhas próprias, senão viram uma frase ilegível. */
+function pareceTabela(l){
+  const toks=String(l).trim().split(/\s+/);
+  if(toks.length<3) return false;
+  const nums=toks.filter(t=>/^-?[\d.,]+$/.test(t)).length;
+  return nums>=3 && nums/toks.length>=0.4;
+}
+
 /* Muitas provas trazem o gabarito no fim, em bloco. Ele precisa ser
    separado ANTES de ler as questões: senão "01. B  02. C" vira questão. */
 function separarGabarito(txt){
@@ -1465,17 +1607,38 @@ function separarGabarito(txt){
       /\d{1,2}\s*[).:\-–]?\s*[A-Ea-e]\b/.test(l));
   }
   if(i<0) return {corpo:txt, chave:null};
-  const bloco=linhas.slice(i).join("\n");
+  const bloco=linhas.slice(i);
   const chave={};
-  const re=/(\d{1,2})\s*[).:\-–]?\s*([A-Ea-e])(?![A-Za-zÀ-ÿ0-9])/g;
-  let m; while((m=re.exec(bloco))) chave[+m[1]]=m[2].toUpperCase();
+
+  // formato de tabela: uma linha com os números, outra com as letras
+  for(let k=0;k<bloco.length-1;k++){
+    const a=bloco[k].trim(), b=bloco[k+1].trim();
+    if(!/^(quest[ãa]o|item|n[ºo°]?)\b/i.test(a)) continue;
+    if(!/^(resposta|gabarito|alternativa)/i.test(b)) continue;
+    const nums=(a.match(/\d{1,2}/g)||[]).map(Number);
+    const letras=(b.match(/\b[A-Ea-e]\b/g)||[]).map(x=>x.toUpperCase());
+    if(nums.length && nums.length===letras.length){
+      nums.forEach((n,idx)=>chave[n]=letras[idx]);
+      break;
+    }
+  }
+
+  // formato em lista: 01. B  /  1) C  /  1-B
+  if(!Object.keys(chave).length){
+    const re=/(\d{1,2})\s*[).:\-–]?\s*([A-Ea-e])(?![A-Za-zÀ-ÿ0-9])/g;
+    let m; while((m=re.exec(bloco.join("\n")))) if(chave[+m[1]]==null) chave[+m[1]]=m[2].toUpperCase();
+  }
   if(!Object.keys(chave).length) return {corpo:txt, chave:null};
   return {corpo:linhas.slice(0,i).join("\n"), chave};
 }
 
+/* Marca de página invisível ao professor, usada só para casar figuras. */
+const MARCA_PAG="\u0001PAG";
+
 function lerQuestoes(txtBruto){
   const {corpo:txt, chave}=separarGabarito(txtBruto);
   const questoes=[]; let gab="", atual=null, ultimaAlt=null, alvo=null;
+  let paginaAtual=0;
   let linhas=String(txt).split(/\r?\n/);
   // descarta cabeçalho/instruções antes da primeira questão numerada,
   // senão o título do documento vira uma questão fantasma
@@ -1483,6 +1646,7 @@ function lerQuestoes(txtBruto){
   if(inicio>0) linhas=linhas.slice(inicio);
   linhas.forEach(linha=>{
     const l=linha.trim();
+    if(l.indexOf(MARCA_PAG)===0){ paginaAtual=parseInt(l.slice(MARCA_PAG.length),10)||0; return; }
     if(!l){ alvo=null; return; }
     const mq=/^(\d{1,2})\s*[.)\-–]\s*(.*)$/.exec(l);
     const ma=/^(\*?)\s*([A-Ea-e])\s*[).\-–]\s+(.*)$/.exec(l);
@@ -1494,13 +1658,16 @@ function lerQuestoes(txtBruto){
       ultimaAlt=k; alvo="alt"; return;
     }
     if(mq && (!atual || atual.alternativas.length)){
-      atual={enunciado:mq[2].trim(),alternativas:[],correta:null};
+      atual={enunciado:mq[2].trim(),alternativas:[],correta:null,pagina:paginaAtual};
       questoes.push(atual); ultimaAlt=null; alvo="enun"; return;
     }
     if(atual && alvo==="alt" && ultimaAlt!==null){
       atual.alternativas[ultimaAlt]+=" "+l; return; }
-    if(atual && alvo==="enun"){ atual.enunciado+=" "+l; return; }
-    if(!atual){ atual={enunciado:l,alternativas:[],correta:null};
+    if(atual && alvo==="enun"){
+      const ultima=atual.enunciado.split("\n").pop();
+      atual.enunciado += ((pareceTabela(l)||pareceTabela(ultima)) ? "\n" : " ") + l;
+      return; }
+    if(!atual){ atual={enunciado:l,alternativas:[],correta:null,pagina:paginaAtual};
       questoes.push(atual); alvo="enun"; }
   });
   if(chave) questoes.forEach((q,i)=>{
@@ -1509,6 +1676,11 @@ function lerQuestoes(txtBruto){
       const k="ABCDE".indexOf(letra);
       if(k>=0 && k<Math.max(q.alternativas.length,5)) q.correta=k;
     }
+  });
+  const limpar=t=>String(t==null?"":t).split(MARCA_PAG)[0].replace(/\s+$/,"");
+  questoes.forEach(q=>{
+    q.enunciado=limpar(q.enunciado);
+    q.alternativas=q.alternativas.map(limpar);
   });
   questoes.forEach(q=>{ gab += (q.correta==null?"?":"ABCDE"[q.correta]); });
   return {questoes,gabarito:gab,doArquivo:!!chave};
@@ -1588,7 +1760,8 @@ E) conjunto vazio
     p.questoes=questoes.map((q,i)=>({enunciado:q.enunciado,
       alternativas:q.alternativas.slice(0,p.no),correta:q.correta,
       // a figura fica presa à posição da questão: reeditar o texto não a perde
-      imagem:(antigas[i]&&antigas[i].imagem)||null}));
+      imagem:(antigas[i]&&antigas[i].imagem)||(iaFiguradas&&iaFiguradas[i])||null}));
+    iaFiguradas=null;
     if(!semMarca && gabarito.length===p.nq) p.gabC=gabarito;
     salvar(); casaNivel="prova"; montarCasa(); };
 }
@@ -1989,8 +2162,10 @@ Volume do prisma">${esc(F.habs)}</textarea>
       questoes:[],discursivas:[],criada:Date.now()};
     if(F.vindoDeArquivo && iaTexto){
       const lidas=lerQuestoes(iaTexto);
-      p.questoes=lidas.questoes.slice(0,p.nq).map(q=>({enunciado:q.enunciado,
-        alternativas:(q.alternativas||[]).slice(0,p.no),correta:q.correta,imagem:null}));
+      p.questoes=lidas.questoes.slice(0,p.nq).map((q,i)=>({enunciado:q.enunciado,
+        alternativas:(q.alternativas||[]).slice(0,p.no),correta:q.correta,
+        imagem:(iaFiguradas&&iaFiguradas[i])||null}));
+      iaFiguradas=null;
       descartarLeitura();
     }
     if(F.substitui){
