@@ -8,7 +8,7 @@
    AO PUBLICAR UMA VERSÃO NOVA: troque o número em VERSAO. É isso que
    avisa o celular de que há atualização; sem trocar, ele continua
    servindo a versão guardada. */
-const VERSAO = "v1";
+const VERSAO = "v2";
 const CACHE = "dbm-omr-" + VERSAO;
 
 /* Tudo que o app precisa para funcionar sozinho. */
@@ -42,17 +42,49 @@ const ARQUIVOS = [
   "./standard_fonts/FoxitDingbats.pfb"
 ];
 
+/* Guarda um arquivo, tentando de novo antes de desistir. Devolve
+   true/false para sabermos exatamente o que ficou de fora. */
+async function guardar(cache, url, tentativas) {
+  for (let i = 0; i < (tentativas || 2); i++) {
+    try {
+      const resp = await fetch(new Request(url, {cache: "reload"}));
+      if (resp && resp.ok) { await cache.put(url, resp.clone()); return true; }
+    } catch (e) { /* tenta de novo */ }
+  }
+  console.warn("[sw] não consegui guardar", url);
+  return false;
+}
+
 self.addEventListener("install", ev => {
   ev.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    /* Um arquivo ausente não pode derrubar a instalação inteira:
-       guarda um a um e segue em frente com o que deu certo. */
-    await Promise.all(ARQUIVOS.map(async url => {
-      try { await cache.add(new Request(url, {cache: "reload"})); }
-      catch (e) { console.warn("[sw] não consegui guardar", url, e); }
-    }));
+    const falhas = [];
+    /* Em série: baixar 27 arquivos de uma vez satura a rede do celular
+       e é justamente aí que os maiores (o worker de 1 MB) falhavam. */
+    for (const url of ARQUIVOS) {
+      const ok = await guardar(cache, url);
+      if (!ok) falhas.push(url);
+    }
+    await self.clients.claim();
+    avisarClientes({tipo: "instalado", falhas});
   })());
 });
+
+async function avisarClientes(msg) {
+  const cs = await self.clients.matchAll({includeUncontrolled: true});
+  cs.forEach(c => c.postMessage(msg));
+}
+
+/* Responde ao app quais arquivos estão realmente guardados. */
+async function conferir() {
+  const cache = await caches.open(CACHE);
+  const faltando = [];
+  for (const url of ARQUIVOS) {
+    const m = await cache.match(url);
+    if (!m) faltando.push(url);
+  }
+  return {total: ARQUIVOS.length, faltando, versao: VERSAO};
+}
 
 self.addEventListener("activate", ev => {
   ev.waitUntil((async () => {
@@ -64,7 +96,30 @@ self.addEventListener("activate", ev => {
 });
 
 self.addEventListener("message", ev => {
-  if (ev.data === "assumir") self.skipWaiting();
+  if (ev.data === "assumir") return self.skipWaiting();
+
+  if (ev.data === "conferir") {
+    ev.waitUntil((async () => {
+      const r = await conferir();
+      (ev.source ? [ev.source] : await self.clients.matchAll())
+        .forEach(c => c.postMessage({tipo: "conferencia", ...r}));
+    })());
+  }
+
+  if (ev.data === "completar") {
+    ev.waitUntil((async () => {
+      const cache = await caches.open(CACHE);
+      const {faltando} = await conferir();
+      const restam = [];
+      for (const url of faltando) {
+        const ok = await guardar(cache, url, 3);
+        if (!ok) restam.push(url);
+      }
+      const r = await conferir();
+      (ev.source ? [ev.source] : await self.clients.matchAll())
+        .forEach(c => c.postMessage({tipo: "conferencia", ...r, completou: true}));
+    })());
+  }
 });
 
 self.addEventListener("fetch", ev => {

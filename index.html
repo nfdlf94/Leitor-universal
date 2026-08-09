@@ -886,9 +886,33 @@ function telaLerArquivo(box){
 
 /* Extrai o texto de um PDF no próprio aparelho, preservando as linhas.
    Serve tanto para a prova quanto para a lista de estudantes. */
+let workerPdfPronto=null;
+
+/* O pdf.js cria o worker a partir de uma URL. Offline, se essa URL não
+   estiver guardada, ele falha com "Setting up fake worker failed".
+   Buscar o arquivo antes e transformá-lo em blob resolve: o worker passa
+   a nascer de bytes que já temos na mão. */
+async function prepararWorkerPdf(){
+  if(workerPdfPronto) return workerPdfPronto;
+  workerPdfPronto=(async()=>{
+    try{
+      const r=await fetch("pdf.worker.min.js");
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      const b=await r.blob();
+      pdfjsLib.GlobalWorkerOptions.workerSrc=URL.createObjectURL(b);
+      return true;
+    }catch(e){
+      console.warn("worker do pdf via blob falhou, usando o caminho direto",e);
+      pdfjsLib.GlobalWorkerOptions.workerSrc="pdf.worker.min.js";
+      return false;
+    }
+  })();
+  return workerPdfPronto;
+}
+
 async function abrirPdf(arquivo){
   if(typeof pdfjsLib==="undefined") throw new Error("faltou o arquivo pdf.min.js");
-  pdfjsLib.GlobalWorkerOptions.workerSrc="pdf.worker.min.js";
+  await prepararWorkerPdf();
   const dados=new Uint8Array(await arquivo.arrayBuffer());
   const limite=new Promise((_,rej)=>setTimeout(()=>rej(new Error(
     "a leitura do PDF não respondeu — confira se o arquivo pdf.worker.min.js "+
@@ -1111,7 +1135,10 @@ async function lerPdfProva(f,p){
     pintarPreDoc(p);
   }catch(e){
     console.warn("PDF sem texto extraível",e);
-    info(`<div class="aviso" style="margin-top:10px">Não consegui ler o PDF: ${esc(e.message)}</div>`);
+    const semWorker=/worker|load script/i.test(String(e.message||""));
+    info(`<div class="aviso" style="margin-top:10px">Não consegui ler o PDF: ${esc(e.message)}
+      ${semWorker?"<br><br><b>O que fazer:</b> conecte-se à internet uma vez, abra "+
+        "Configurações e toque em “Verificar uso offline”. Isso baixa a peça que faltou.":""}</div>`);
   }
 }
 
@@ -1516,6 +1543,48 @@ function telaFechamento(box){
   };
 }
 
+/* ── diagnóstico do uso sem internet ────────────────────────────── */
+let ultimaConferencia=null;
+
+function montarOffline(){
+  const c=$("#offEstado"); if(!c) return;
+  if(!("serviceWorker" in navigator)){
+    c.innerHTML='<div class="aviso">Este navegador não guarda o app para uso offline.</div>'; return; }
+  const r=ultimaConferencia;
+  if(!r){ c.innerHTML='<p class="hint" style="margin-top:0">Toque em verificar para conferir '+
+    'se todas as peças do app estão guardadas no aparelho.</p>'; return; }
+  if(!r.faltando.length){
+    c.innerHTML=`<div class="diag"><b>Tudo guardado</b>${r.total} arquivos no aparelho
+      (${esc(r.versao||"")}). O app abre e funciona sem internet.</div>`;
+    return; }
+  c.innerHTML=`<div class="aviso"><b>${r.faltando.length} de ${r.total} não foram guardados</b>
+    ${r.faltando.map(f=>esc(f.replace("./",""))).join(", ")}<br><br>
+    ${navigator.onLine?"Toque em verificar de novo para baixar o que falta."
+      :"Conecte-se à internet e toque em verificar."}</div>`;
+}
+
+function verificarOffline(){
+  const c=$("#offEstado");
+  if(!navigator.serviceWorker || !navigator.serviceWorker.controller){
+    if(c) c.innerHTML='<div class="aviso">O app ainda não foi guardado. '+
+      'Conecte-se à internet, recarregue a página e tente de novo.</div>';
+    return; }
+  if(c) c.innerHTML='<div class="diag">Conferindo…</div>';
+  navigator.serviceWorker.controller.postMessage(navigator.onLine?"completar":"conferir");
+}
+
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.addEventListener("message", ev=>{
+    const d=ev.data||{};
+    if(d.tipo==="conferencia"){ ultimaConferencia=d; montarOffline(); }
+    if(d.tipo==="instalado" && d.falhas && d.falhas.length){
+      console.warn("[sw] ficaram de fora:", d.falhas);
+      avisoFlutuante('<b>App guardado pela metade</b>'+d.falhas.length+
+        ' arquivo(s) não foram baixados. Abra Configurações › Verificar uso offline.',"aviso",8);
+    }
+  });
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    CÓPIA DE SEGURANÇA
    Como não existe servidor, o arquivo exportado é a única cópia que
@@ -1614,6 +1683,10 @@ function telaConfig(box){
     <div class="duo" style="margin-top:14px">
       <button class="btn gho" id="cfApagar">Apagar chave</button>
       <button class="btn" id="cfSalvar">Salvar</button></div>
+    <div class="rot">Uso sem internet</div>
+    <div id="offEstado"></div>
+    <button class="btn sec" id="offVerificar" style="margin-top:9px">Verificar uso offline</button>
+
     <div class="rot">Cópia de segurança</div>
     <p class="hint" style="margin-top:0">Tudo fica guardado só neste celular. Se você
       trocar de aparelho, limpar o navegador ou perder o telefone, os dados vão junto.
@@ -1638,6 +1711,8 @@ function telaConfig(box){
     guarda.esc(CHAVE_API,$("#cfChave").value.trim());
     guarda.esc(MODELO_API,$("#cfModelo").value);
     casaNivel=casaProva?"ler":"turmas"; montarCasa(); };
+  montarOffline();
+  $("#offVerificar").onclick=verificarOffline;
   $("#bkBaixar").onclick=baixarBackup;
   $("#bkAbrir").onclick=()=>$("#bkArq").click();
   $("#bkArq").onchange=ev=>{
