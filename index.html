@@ -891,7 +891,13 @@ async function abrirPdf(arquivo){
   const limite=new Promise((_,rej)=>setTimeout(()=>rej(new Error(
     "a leitura do PDF não respondeu — confira se o arquivo pdf.worker.min.js "+
     "foi enviado junto com o app")),25000));
-  return await Promise.race([pdfjsLib.getDocument({data:dados}).promise,limite]);
+  /* Sem os arquivos de fonte padrão, um PDF que não embute suas fontes
+     é renderizado SEM TEXTO — e as tabelas sairiam recortadas vazias. */
+  return await Promise.race([pdfjsLib.getDocument({
+    data:dados,
+    standardFontDataUrl:"standard_fonts/",
+    useSystemFonts:false
+  }).promise, limite]);
 }
 
 /* Texto e figuras, página a página.
@@ -902,6 +908,7 @@ async function abrirPdf(arquivo){
    renderiza a página e recorta a faixa. Funciona nos dois casos. */
 const VAO_MINIMO = 45;     // pontos de espaço vertical que denunciam uma figura
 const ESCALA_FIG = 2;      // resolução do recorte
+const FOLGA_FIG = 5;       // afasta o recorte das linhas de texto vizinhas
 
 async function conteudoDePdf(arquivo){
   const doc=await abrirPdf(arquivo);
@@ -920,22 +927,52 @@ async function conteudoDePdf(arquivo){
     });
 
     const bandas=[];
+
+    // 1) vãos grandes = gráfico, esquema ou desenho
     for(let k=0;k<linhas.length-1;k++){
       const vao=linhas[k].y-(linhas[k+1].y+linhas[k+1].h);
       if(vao>=VAO_MINIMO)
-        bandas.push({depois:k, de:linhas[k+1].y+linhas[k+1].h, ate:linhas[k].y});
+        bandas.push({tipo:"figura", depois:k, engole:[],
+          de:linhas[k+1].y+linhas[k+1].h+FOLGA_FIG,
+          ate:linhas[k].y-FOLGA_FIG});
+    }
+
+    // 2) blocos de linhas tabulares = tabela; vira imagem, com as bordas
+    let k=0;
+    while(k<linhas.length){
+      if(!pareceTabela(linhas[k].txt)){ k++; continue; }
+      let fim=k;
+      while(fim+1<linhas.length && pareceTabela(linhas[fim+1].txt)) fim++;
+      if(fim>k){                                   // pelo menos duas linhas
+        let ini=k;
+        // puxa o cabeçalho da tabela, que costuma não ter números
+        if(ini>0){
+          const acima=String(linhas[ini-1].txt).trim();
+          if(acima.split(/\s+/).length<=6 && acima.length<=60 && !/[:.]$/.test(acima)) ini--;
+        }
+        bandas.push({tipo:"tabela", depois:ini-1, engole:[ini,fim],
+          de:linhas[fim].y-linhas[fim].h*0.4-FOLGA_FIG,
+          ate:linhas[ini].y+linhas[ini].h+FOLGA_FIG});
+      }
+      k=fim+1;
     }
 
     let recortes=[];
     if(bandas.length) recortes=await recortarFiguras(pg, bandas);
 
+    const engolidas=new Set();
+    bandas.forEach((b,j)=>{ if(recortes[j] && b.engole.length)
+      for(let x=b.engole[0];x<=b.engole[1];x++) engolidas.add(x); });
+
     // monta as linhas de texto intercalando a marca da figura no lugar certo
     const saida=[];
-    linhas.forEach((L,k)=>{
+    bandas.forEach((b,j)=>{ if(b.depois<0 && recortes[j]){
+      figuras.push(recortes[j]); saida.push(MARCA_FIG+(figuras.length-1)); }});
+    linhas.forEach((L,idx)=>{
       const t=String(L.txt).trim();
-      if(t) saida.push(t);
+      if(t && !engolidas.has(idx)) saida.push(t);
       bandas.forEach((b,j)=>{
-        if(b.depois===k && recortes[j]){
+        if(b.depois===idx && recortes[j]){
           figuras.push(recortes[j]);
           saida.push(MARCA_FIG+(figuras.length-1));
         }
@@ -983,7 +1020,7 @@ function apararBranco(cv){
       if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
     }
   }
-  if(x1<0 || (x1-x0)<40 || (y1-y0)<25) return null;   // vão em branco de verdade
+  if(x1<0 || (x1-x0)<40 || (y1-y0)<18) return null;   // vão em branco de verdade
   const m=6;
   x0=Math.max(0,x0-m); y0=Math.max(0,y0-m);
   x1=Math.min(w-1,x1+m); y1=Math.min(h-1,y1+m);
@@ -1619,6 +1656,10 @@ function limparRuidoProva(paginas){
 function pareceTabela(l){
   const t=String(l).trim();
   if(!t) return false;
+  // alternativa ou enunciado numerado nunca é linha de tabela —
+  // "A) R$ 12,00" e "A) 20%" enganavam a regra e sumiam da prova
+  if(/^\*?\s*[A-Ea-e]\s*[).\-–]\s/.test(t)) return false;
+  if(/^\d{1,2}\s*[.)\-–]\s/.test(t)) return false;
   const toks=t.split(/\s+/);
   const nums=toks.filter(x=>/^-?[\d.,]+%?$/.test(x)).length;
   // linha com vários números soltos: "Tempo (h) 1 2 3 4"
