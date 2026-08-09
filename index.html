@@ -2554,25 +2554,57 @@ function pintarResultados(){
   const p=provaAtiva(), t=turmaAtiva();
   if(!p){ $("#pill").hidden=true; $("#resAcoes").hidden=true; $("#resSub").textContent="";
     $("#resLista").innerHTML='<div class="vazio"><b>Nenhuma prova selecionada</b>Escolha a turma e a prova na aba Turmas.</div>'; return; }
-  const A=resDa(p.id).slice().sort((a,b)=>ordNum(a.numero,b.numero));
-  $("#pill").hidden=!A.length; $("#pill").textContent=A.length;
-  $("#resAcoes").hidden=!A.length;
-  $("#resSub").textContent=A.length
-    ? `${A.length} de ${t.alunos.length||A.length} corrigidos · ${p.codigo} · ${t.nome}`
-    : "Nenhum cartão corrigido nesta prova ainda.";
-  if(!A.length){ $("#resLista").innerHTML='<div class="vazio"><b>Sem resultados</b>Leia um cartão na aba Ler ou use a Correção manual.</div>'; return; }
+
+  /* A lista mostra a TURMA INTEIRA, não só quem já foi corrigido:
+     é assim que dá para ver de relance quem ainda falta. */
+  const matriculados=alunosEm(t,p.periodo||1);
+  const notas=resDa(p.id);
+  const porNumero={}; notas.forEach(r=>porNumero[r.numero]=r);
+
+  const linhas=matriculados.map(a=>({aluno:a, res:porNumero[a.numero]||null}));
+  // corrigidos que não estão mais na lista (transferidos) entram no fim
+  notas.forEach(r=>{ if(!matriculados.some(a=>a.numero===r.numero))
+    linhas.push({aluno:{numero:r.numero,nome:r.nome}, res:r, fora:true}); });
+  linhas.sort((x,y)=>ordNum(x.aluno.numero,y.aluno.numero));
+
+  const feitos=notas.length, total=matriculados.length;
+  $("#pill").hidden=!feitos; $("#pill").textContent=feitos;
+  $("#resAcoes").hidden=!feitos;
+  $("#resSub").textContent = total
+    ? `${feitos} de ${total} corrigidos · ${p.codigo} · ${t.nome}`
+    : (feitos?`${feitos} corrigidos · ${p.codigo} · ${t.nome}`
+             :"Cadastre os estudantes da turma para ver a lista completa.");
+
+  if(!linhas.length){
+    $("#resLista").innerHTML='<div class="vazio"><b>Sem estudantes</b>Cadastre a turma em Turmas.</div>';
+    return; }
+
   const max=notaMaxima(p);
-  $("#resLista").innerHTML=A.map((a,i)=>{
+  $("#resLista").innerHTML=linhas.map((L,i)=>{
+    const a=L.res;
+    if(!a) return `<button class="aluno" data-p="${esc(L.aluno.numero)}" style="opacity:.62">
+      <div style="flex:1;min-width:0">
+        <div class="nm"><span style="color:var(--mute);font-family:var(--mono);font-size:12px">${esc(L.aluno.numero)} </span>${esc(L.aluno.nome)}</div>
+        <div class="rs">ainda não corrigido · toque para lançar</div></div>
+      <div class="nt" style="color:var(--mute);font-size:19px">—</div></button>`;
     const nf=(a.nota!=null?a.nota:notaFinal(p,a)), rel=max?10*nf/max:0;
     return `<button class="aluno" data-x="${i}"><div style="flex:1;min-width:0">
-      <div class="nm"><span style="color:var(--mute);font-family:var(--mono);font-size:12px">${esc(a.numero)} </span>${esc(a.nome)}</div>
-      <div class="rs">${a.acertos}/${p.nq} acertos${a.notaDisc?" · escrita "+a.notaDisc:""}${a.origem==="manual"?" · manual":""}</div></div>
+      <div class="nm"><span style="color:var(--mute);font-family:var(--mono);font-size:12px">${esc(L.aluno.numero)} </span>${esc(L.aluno.nome)}</div>
+      <div class="rs">${a.acertos}/${p.nq} acertos${a.notaDisc?" · escrita "+a.notaDisc:""}${
+        a.origem==="manual"?" · manual":""}${L.fora?" · transferido":""}</div></div>
       <div class="nt" style="color:${rel>=6?"var(--mint)":rel>=4?"var(--amber)":"var(--coral)"}">${nf.toFixed(1).replace(".",",")}</div>
     </button><div id="det${i}"></div>`;}).join("");
+
+  // pendente: abre direto a correção manual daquele estudante
+  $("#resLista").querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{
+    manAluno=b.dataset.p;
+    manR=new Array(p.nq).fill(null); manDisc=0;
+    montarManual(); irPara("man"); });
+
   $("#resLista").querySelectorAll("[data-x]").forEach(b=>b.onclick=()=>{
     const i=+b.dataset.x, d=$("#det"+i);
     if(d.innerHTML){ d.innerHTML=""; return; }
-    const a=A[i];
+    const a=linhas[i].res;
     d.innerHTML=`<div class="card" style="margin:-3px 0 9px">
       <p style="margin-bottom:8px"><b style="color:var(--mint)">Acertou:</b> ${a.certas.length?a.certas.join(", "):"—"}<br>
       <b style="color:var(--coral)">Errou:</b> ${a.erradas.length?a.erradas.join(", "):"—"}</p>
@@ -2581,9 +2613,14 @@ function pintarResultados(){
           <div style="font-family:var(--mono);font-size:9px;color:var(--mute)">Q${q+1}</div>
           <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:${r===a.gab[q]?"var(--mint)":"var(--coral)"}">${r||"—"}</div>
           <div style="font-family:var(--mono);font-size:9px;color:var(--mute)">${a.gab[q]}</div></div>`).join("")}</div>
-      <button class="btn gho" style="margin-top:11px;padding:9px" data-rm="${i}">Remover este registro</button></div>`;
+      <div class="linha" style="margin-top:11px">
+        <button class="btn gho" style="padding:9px" data-ed="${i}">Corrigir de novo</button>
+        <button class="btn gho" style="padding:9px" data-rm="${i}">Remover</button></div></div>`;
+    d.querySelector("[data-ed]").onclick=()=>{
+      manAluno=a.numero; manR=a.R.slice(); manDisc=a.notaDisc||0;
+      montarManual(); irPara("man"); };
     d.querySelector("[data-rm]").onclick=()=>{
-      if(!confirm("Remover "+a.nome+"?")) return;
+      if(!confirm("Remover a nota de "+a.nome+"?")) return;
       E.res=E.res.filter(x=>chave(x)!==chave(a)); salvar();
       pintarResultados(); pintarDesempenho(); };
   });
@@ -2713,13 +2750,21 @@ $("#bCsv").onclick=()=>{
   const p=provaAtiva(), t=turmaAtiva(); if(!p) return;
   const cab=["escola","turma","numero","aluno","nota_final","nota_objetiva","nota_escrita","acertos","erros","aproveitamento",
     "questoes_erradas","origem","prova",...Array.from({length:p.nq},(_,i)=>"Q"+(i+1))];
-  const A=resDa(p.id).slice().sort((a,b)=>ordNum(a.numero,b.numero));
+  const feitos={}; resDa(p.id).forEach(r=>feitos[r.numero]=r);
+  const A=alunosEm(t,p.periodo||1).map(al=>feitos[al.numero]||
+      {numero:al.numero,nome:al.nome,acertos:null,erros:null,notaDisc:null,
+       erradas:[],origem:"",R:[]})
+    .concat(resDa(p.id).filter(r=>!alunosEm(t,p.periodo||1).some(al=>al.numero===r.numero)))
+    .sort((a,b)=>ordNum(a.numero,b.numero));
   const e=escolaDe(t.escola);
-  const vg=x=>Number(x).toFixed(2).replace(".",",");
+  const vg=x=>(x==null?"":Number(x).toFixed(2).replace(".",","));
   const lin=A.map(a=>[e.curto,t.nome,a.numero,`"${String(a.nome).replace(/"/g,'""')}"`,
-    vg(a.nota!=null?a.nota:notaFinal(p,a)),vg(pontosObj(p)*a.acertos/p.nq),vg(a.notaDisc||0),
-    a.acertos,a.erros,
-    pct(a.acertos,p.nq)+"%",`"${a.erradas.join(", ")}"`,a.origem,p.codigo,
+    vg(a.acertos==null?null:(a.nota!=null?a.nota:notaFinal(p,a))),
+    vg(a.acertos==null?null:pontosObj(p)*a.acertos/p.nq),
+    vg(a.acertos==null?null:(a.notaDisc||0)),
+    a.acertos==null?"":a.acertos, a.erros==null?"":a.erros,
+    a.acertos==null?"":pct(a.acertos,p.nq)+"%",`"${(a.erradas||[]).join(", ")}"`,
+    a.origem||"pendente",p.codigo,
     ...a.R.map(r=>r||"")].join(";"));
   baixar([cab.join(";"),...lin].join("\r\n"),
     `notas_${t.nome}_${p.codigo}_${new Date().toISOString().slice(0,10)}.csv`,"text/csv");
