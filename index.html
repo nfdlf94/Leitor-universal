@@ -1206,6 +1206,10 @@ async function chamarIA(p){
   const st={ set innerHTML(v){ const el=$("#iaStatus"); if(el) el.innerHTML=v; } };
   if(!iaArquivo && !iaTextoDoc){
     st.innerHTML='<div class="aviso" style="margin-top:10px">Escolha o arquivo primeiro.</div>'; return; }
+  if(navigator.onLine===false){
+    st.innerHTML='<div class="aviso" style="margin-top:10px">Sem internet. '+
+      'Este é o único recurso do app que precisa de rede — o resto funciona offline. '+
+      'Use o caminho pelo chat quando estiver conectado, ou tente de novo depois.</div>'; return; }
   st.innerHTML='<div class="diag" style="margin-top:10px">Enviando para a Claude…</div>';
   // texto de Word custa muito menos que a mesma prova como imagem
   const bloco = iaTextoDoc
@@ -1512,6 +1516,85 @@ function telaFechamento(box){
   };
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   CÓPIA DE SEGURANÇA
+   Como não existe servidor, o arquivo exportado é a única cópia que
+   sobrevive à perda do aparelho.
+   ═══════════════════════════════════════════════════════════════════ */
+const ULTIMO_BACKUP="dbm_ultimo_backup";
+
+function resumoDados(){
+  const turmas=(E.turmas||[]).filter(t=>(t.alunos||[]).length).length;
+  const alunos=(E.turmas||[]).reduce((n,t)=>n+(t.alunos||[]).length,0);
+  const figuras=(E.provas||[]).reduce((n,p)=>n+((p.questoes||[]).filter(q=>q.imagem).length),0);
+  return {turmas, alunos, provas:(E.provas||[]).length,
+          notas:(E.res||[]).length, figuras,
+          kb:Math.round(espacoUsado()/1024)};
+}
+
+function montarBackup(){
+  const c=$("#bkResumo"); if(!c) return;
+  const r=resumoDados();
+  const q=guarda.ler(ULTIMO_BACKUP);
+  const dias=q?Math.floor((Date.now()-Number(q))/86400000):null;
+  const alerta=(r.notas>0 && (dias===null || dias>=30));
+  c.innerHTML=`<div class="${alerta?"aviso":"diag"}">
+    ${alerta?"<b>Sem cópia recente</b>":"<b>Seus dados</b>"}
+    ${r.turmas} turma${r.turmas===1?"":"s"} com estudantes · ${r.alunos} estudantes ·
+    ${r.provas} prova${r.provas===1?"":"s"} · ${r.notas} nota${r.notas===1?"":"s"} ·
+    ${r.figuras} figura${r.figuras===1?"":"s"} · ${r.kb} KB<br>
+    ${q?("Última cópia: "+new Date(Number(q)).toLocaleDateString("pt-BR")+
+        (dias?" ("+dias+" dia"+(dias===1?"":"s")+" atrás)":" (hoje)"))
+      :"Nenhuma cópia baixada até agora."}</div>`;
+}
+
+function baixarBackup(){
+  const pacote={
+    formato:"desbugando-omr",
+    versao:E.v||5,
+    gerado:new Date().toISOString(),
+    professor:lerProfessor(),
+    dados:E                      // a chave de API fica de fora, de propósito
+  };
+  const hoje=new Date().toISOString().slice(0,10);
+  baixar(JSON.stringify(pacote), "backup_provas_"+hoje+".json", "application/json");
+  guarda.esc(ULTIMO_BACKUP, String(Date.now()));
+  montarBackup();
+}
+
+function validarBackup(txt){
+  const d=JSON.parse(txt);
+  const E2=d && (d.dados||d);
+  if(!E2 || !Array.isArray(E2.turmas) || !Array.isArray(E2.provas))
+    throw new Error("este arquivo não é uma cópia do app");
+  return E2;
+}
+
+/* Juntar preserva o que existe aqui e acrescenta o que veio de fora.
+   Em conflito de nota, vence a mais recente. */
+function juntarBackup(E2){
+  const porId=(lista,novos)=>{
+    const mapa={}; lista.forEach(x=>mapa[x.id]=x);
+    (novos||[]).forEach(x=>{ if(!mapa[x.id]) lista.push(x); });
+    return lista;
+  };
+  porId(E.escolas, E2.escolas);
+  (E2.turmas||[]).forEach(t2=>{
+    const t=E.turmas.find(x=>x.id===t2.id || x.nome===t2.nome);
+    if(!t){ E.turmas.push(t2); return; }
+    (t2.alunos||[]).forEach(a2=>{
+      if(!t.alunos.some(a=>a.numero===a2.numero)) t.alunos.push(a2); });
+    t.alunos.sort((a,b)=>ordNum(a.numero,b.numero));
+    if(!t.periodo && t2.periodo) t.periodo=t2.periodo;
+  });
+  porId(E.provas, E2.provas);
+  (E2.res||[]).forEach(r2=>{
+    const i=E.res.findIndex(r=>chave(r)===chave(r2));
+    if(i<0) E.res.push(r2);
+    else if((r2.t||0)>(E.res[i].t||0)) E.res[i]=r2;
+  });
+}
+
 function telaConfig(box){
   box.innerHTML=`<div class="migalha"><button id="mVolta">‹ Voltar</button></div>
     <h2>Configurações</h2>
@@ -1531,18 +1614,70 @@ function telaConfig(box){
     <div class="duo" style="margin-top:14px">
       <button class="btn gho" id="cfApagar">Apagar chave</button>
       <button class="btn" id="cfSalvar">Salvar</button></div>
+    <div class="rot">Cópia de segurança</div>
+    <p class="hint" style="margin-top:0">Tudo fica guardado só neste celular. Se você
+      trocar de aparelho, limpar o navegador ou perder o telefone, os dados vão junto.
+      Baixe uma cópia de vez em quando e guarde no e-mail ou na nuvem.</p>
+    <div id="bkResumo"></div>
+    <div class="duo" style="margin-top:10px">
+      <button class="btn sec" id="bkBaixar">Baixar cópia</button>
+      <button class="btn gho" id="bkAbrir">Restaurar</button></div>
+    <input type="file" id="bkArq" accept=".json,application/json" hidden>
+    <div id="bkAviso"></div>
+
     <div class="aviso" style="margin-top:14px">A chave fica guardada neste aparelho,
       no armazenamento do navegador. Não a use num celular compartilhado, e apague-a
       antes de emprestar o aparelho.</div>
     <p class="hint">A cobrança da API é separada do plano do aplicativo Claude.
       Você cria a chave e coloca crédito em console.anthropic.com.</p>`;
   $("#cfModelo").value=lerModelo();
+  montarBackup();
   $("#mVolta").onclick=()=>{casaNivel=casaProva?"ler":"turmas";montarCasa();};
   $("#cfSalvar").onclick=()=>{
     guarda.esc(NOME_PROF,$("#cfProf").value.trim());
     guarda.esc(CHAVE_API,$("#cfChave").value.trim());
     guarda.esc(MODELO_API,$("#cfModelo").value);
     casaNivel=casaProva?"ler":"turmas"; montarCasa(); };
+  $("#bkBaixar").onclick=baixarBackup;
+  $("#bkAbrir").onclick=()=>$("#bkArq").click();
+  $("#bkArq").onchange=ev=>{
+    const f=ev.target.files[0]; ev.target.value=""; if(!f) return;
+    const av=t=>{ const el=$("#bkAviso"); if(el) el.innerHTML=t; };
+    const r=new FileReader();
+    r.onload=()=>{
+      let E2;
+      try{ E2=validarBackup(String(r.result)); }
+      catch(e){ av(`<div class="aviso" style="margin-top:11px">Não consegui ler: ${esc(e.message)}</div>`); return; }
+      const alunos=(E2.turmas||[]).reduce((n,t)=>n+((t.alunos||[]).length),0);
+      av(`<div class="diag" style="margin-top:11px"><b>${esc(f.name)}</b>
+        Contém ${(E2.turmas||[]).length} turmas, ${alunos} estudantes,
+        ${(E2.provas||[]).length} provas e ${(E2.res||[]).length} notas.
+        <div class="duo" style="margin-top:10px">
+          <button class="btn sec" id="bkJuntar">Juntar com o meu</button>
+          <button class="btn gho" id="bkTrocar">Substituir tudo</button></div>
+        <p class="hint">“Juntar” mantém o que já está aqui e acrescenta o que falta.
+        “Substituir” apaga tudo o que existe neste aparelho.</p></div>`);
+      $("#bkJuntar").onclick=()=>{
+        const antes=resumoDados();
+        juntarBackup(E2); salvar();
+        const dep=resumoDados();
+        av(`<div class="diag" style="margin-top:11px"><b>Pronto</b>
+          Estudantes: ${antes.alunos} → ${dep.alunos} · Provas: ${antes.provas} → ${dep.provas}
+          · Notas: ${antes.notas} → ${dep.notas}</div>`);
+        refletirBarra(); pintarResultados(); pintarDesempenho(); montarManual(); montarBackup(); };
+      $("#bkTrocar").onclick=()=>{
+        const r0=resumoDados();
+        if(!confirm("Substituir apaga o que está neste aparelho:\n\n"+
+          r0.alunos+" estudantes, "+r0.provas+" provas e "+r0.notas+" notas.\n\n"+
+          "Tem certeza? Isso não pode ser desfeito.")) return;
+        E=E2; if(!E.v) E.v=5; salvar();
+        if(E.ativa && provaDe(E.ativa)) ativar(E.ativa); else { E.ativa=null; refletirBarra(); }
+        casaNivel="turmas"; casaTurma=null; casaProva=null;
+        pintarResultados(); pintarDesempenho(); montarManual();
+        alert("Dados restaurados."); irPara("casa"); };
+    };
+    r.readAsText(f); };
+
   $("#cfApagar").onclick=()=>{
     if(!confirm("Apagar a chave guardada?")) return;
     guarda.esc(CHAVE_API,""); $("#cfChave").value=""; };
@@ -1919,6 +2054,13 @@ function telaTurmas(box){
         </div><span class="ch">›</span></button>`;}).join("");
     h+="</div>";
   });
+  const q=guarda.ler(ULTIMO_BACKUP);
+  const diasSemCopia=q?Math.floor((Date.now()-Number(q))/86400000):999;
+  if((E.res||[]).length>=5 && diasSemCopia>=30)
+    h+=`<div class="aviso" style="margin-top:14px"><b>Faça uma cópia de segurança</b>
+      Você tem ${E.res.length} notas guardadas só neste celular
+      ${q?"e a última cópia foi há "+diasSemCopia+" dias":"e nenhuma cópia baixada"}.
+      Abra Configurações e toque em “Baixar cópia”.</div>`;
   h+=`<button class="item" id="bCfg" style="margin-top:6px"><div class="cor">
     <div class="t1">Configurações</div>
     <div class="t2">${lerProfessor()?esc(lerProfessor()):"Sem nome de professor"} · ${
@@ -2864,6 +3006,50 @@ $("#bTrocar").onclick=()=>{
   if(v==="res"){ seletorAberto.resSel=true; pintarResultados(); return; }
   if(v==="des"){ seletorAberto.desSel=true; pintarDesempenho(); return; }
   casaNivel="turmas"; irPara("casa"); };
+
+/* ═══════════════════════════════════════════════════════════════════
+   FUNCIONAMENTO SEM INTERNET
+   O Service Worker guarda os arquivos do app no aparelho. Os dados
+   (turmas, provas, notas) já eram locais — não há servidor envolvido.
+   ═══════════════════════════════════════════════════════════════════ */
+function avisoFlutuante(texto, cls, segundos){
+  const d=document.createElement("div");
+  d.className=cls||"diag";
+  d.style.cssText="position:fixed;left:10px;right:10px;bottom:calc(72px + env(safe-area-inset-bottom));"+
+    "z-index:99;box-shadow:0 8px 24px #0009";
+  d.innerHTML=texto;
+  document.body.appendChild(d);
+  if(segundos) setTimeout(()=>d.remove(), segundos*1000);
+  return d;
+}
+
+(function ligarOffline(){
+  if(!("serviceWorker" in navigator)) return;
+  window.addEventListener("load", ()=>{
+    navigator.serviceWorker.register("sw.js").then(reg=>{
+      reg.addEventListener("updatefound", ()=>{
+        const novo=reg.installing;
+        if(!novo) return;
+        novo.addEventListener("statechange", ()=>{
+          if(novo.state==="installed" && navigator.serviceWorker.controller){
+            const a=avisoFlutuante('<b>Atualização disponível</b>'+
+              'Uma versão nova do app foi baixada. '+
+              '<button class="btn" id="swAgora" style="margin-top:9px;padding:9px">Usar agora</button>');
+            a.querySelector("#swAgora").onclick=()=>{
+              novo.postMessage("assumir"); location.reload(); };
+          }
+        });
+      });
+    }).catch(e=>console.warn("service worker não registrou",e));
+  });
+
+  const mostrarRede=()=>{
+    if(navigator.onLine) return;
+    avisoFlutuante('<b>Sem internet</b>O app funciona normalmente. '+
+      'Só a leitura de prova pela Claude precisa de rede.', "aviso", 6);
+  };
+  window.addEventListener("offline", mostrarRede);
+})();
 
 (function conferirPecas(){
   const faltando=[];
